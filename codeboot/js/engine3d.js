@@ -32,6 +32,8 @@ class GameEngine3D {
 		this.laserMeshes = [];
 		this.gateMeshes = [];
 		this.butterflies = [];
+		this.animatedBiomeObjects = [];
+		this.currentBiome = 'campo';
 
 		this.zoomMultiplier = 1.0;
 		this.focusOnBot = false;
@@ -70,9 +72,9 @@ class GameEngine3D {
 		const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
 		this.scene.add(ambientLight);
 
-		const hemiLight = new THREE.HemisphereLight(0xf0fdf4, 0xdcfce7, 0.65);
-		hemiLight.position.set(0, 20, 0);
-		this.scene.add(hemiLight);
+		this.hemiLight = new THREE.HemisphereLight(0xf0fdf4, 0xdcfce7, 0.65);
+		this.hemiLight.position.set(0, 20, 0);
+		this.scene.add(this.hemiLight);
 
 		this.sunLight = new THREE.DirectionalLight(0xfffbeb, 1.25);
 		this.sunLight.position.set(12, 22, 10);
@@ -178,6 +180,24 @@ class GameEngine3D {
 		this.laserMeshes = [];
 		this.gateMeshes = [];
 		this.butterflies = [];
+		this.animatedBiomeObjects = [];
+
+		const mod = (levelData.id || "1.1").split('.')[0];
+		let biomeType = "espacio";
+		if (mod === "2") biomeType = "maquinas";
+		else if (mod === "3") biomeType = "campo";
+		else if (mod === "4") biomeType = "ciberespacio";
+		else if (mod === "5") biomeType = "cristal";
+		this.currentBiome = biomeType;
+		const cfg = this.getBiomeConfig(biomeType);
+
+		if (this.hemiLight) {
+			this.hemiLight.color.setHex(cfg.hemiSky);
+			this.hemiLight.groundColor.setHex(cfg.hemiGround);
+		}
+		if (this.sunLight) {
+			this.sunLight.color.setHex(cfg.sunColor);
+		}
 
 		while (this.tilesGroup.children.length > 0) {
 			const obj = this.tilesGroup.children[0];
@@ -201,7 +221,7 @@ class GameEngine3D {
 
 		const slabGeo = new THREE.BoxGeometry(platW, platH, platD);
 		const slabMat = new THREE.MeshStandardMaterial({
-			color: 0xf8fafc,
+			color: cfg.slabColor,
 			roughness: 0.22,
 			metalness: 0.08
 		});
@@ -222,8 +242,8 @@ class GameEngine3D {
 
 		const trimGeo = new THREE.BoxGeometry(platW + 0.06, 0.04, platD + 0.06);
 		const trimMat = new THREE.MeshStandardMaterial({
-			color: 0x22c55e,
-			emissive: 0x16a34a,
+			color: cfg.trimColor,
+			emissive: cfg.trimEmissive,
 			emissiveIntensity: 0.4,
 			roughness: 0.2
 		});
@@ -256,17 +276,17 @@ class GameEngine3D {
 
 		const floorGeo = new THREE.BoxGeometry(0.96, 0.22, 0.96);
 		const floorMat = new THREE.MeshStandardMaterial({
-			color: 0xf8fafc,
+			color: cfg.floorColor,
 			roughness: 0.28,
 			metalness: 0.04
 		});
 		const wallMat = new THREE.MeshStandardMaterial({
-			color: 0x166534,
-			roughness: 0.75,
+			color: cfg.wallColor,
+			roughness: cfg.wallRough,
 			metalness: 0.05
 		});
 		const wallCapMat = new THREE.MeshStandardMaterial({
-			color: 0x22c55e,
+			color: cfg.wallCapColor,
 			roughness: 0.45,
 			metalness: 0.05
 		});
@@ -297,29 +317,7 @@ class GameEngine3D {
 
 					this.tilesGroup.add(wallMesh, capMesh);
 
-					const seed = (c * 23 + r * 37) % 10;
-					if (seed <= 2) {
-						const tree = this.createTree(0.72 + (seed * 0.08), seed % 2);
-						tree.position.set(posX, wallH + 0.02, posZ);
-						this.tilesGroup.add(tree);
-					} else if (seed <= 6) {
-						const flowerColors = [0xfacc15, 0xf43f5e, 0xec4899, 0xa855f7, 0x38bdf8];
-						const flower1 = this.createFlower(flowerColors[(c + r) % flowerColors.length], 0.9);
-						flower1.position.set(posX - 0.18, wallH + 0.02, posZ - 0.12);
-						const flower2 = this.createFlower(flowerColors[(c * 3 + r) % flowerColors.length], 0.75);
-						flower2.position.set(posX + 0.16, wallH + 0.02, posZ + 0.15);
-						const grass = this.createGrassTuft(0.85);
-						grass.position.set(posX, wallH + 0.02, posZ);
-						this.tilesGroup.add(flower1, flower2, grass);
-					} else {
-						const grass1 = this.createGrassTuft(1.0);
-						grass1.position.set(posX - 0.14, wallH + 0.02, posZ + 0.12);
-						const grass2 = this.createGrassTuft(0.8);
-						grass2.position.set(posX + 0.15, wallH + 0.02, posZ - 0.14);
-						const flower = this.createFlower(0xfacc15, 0.8);
-						flower.position.set(posX, wallH + 0.02, posZ);
-						this.tilesGroup.add(grass1, grass2, flower);
-					}
+					this.decorateWallBlock(c, r, posX, wallH, posZ, biomeType);
 				} else if (tileType === 3) {
 					const pitGeo = new THREE.BoxGeometry(0.96, 0.6, 0.96);
 					const pitMesh = new THREE.Mesh(pitGeo, pitMat);
@@ -344,24 +342,7 @@ class GameEngine3D {
 			}
 		}
 
-		const butterflyColors = [0x38bdf8, 0xfb923c, 0xf472b6, 0xfacc15];
-		const numButterflies = 4;
-		const radiusX = (cols / 2) + 0.9;
-		const radiusZ = (rows / 2) + 0.9;
-
-		for (let i = 0; i < numButterflies; i++) {
-			const bData = this.createButterfly(butterflyColors[i % butterflyColors.length]);
-			bData.cx = 0;
-			bData.cz = 0;
-			bData.cy = 0.95 + (i * 0.2);
-			bData.radiusX = radiusX - (i * 0.22);
-			bData.radiusZ = radiusZ - (i * 0.18);
-			bData.speed = (0.55 + (i * 0.15)) * (i % 2 === 0 ? 1 : -1);
-			bData.phase = (Math.PI * 2 * i) / numButterflies;
-			bData.group.position.set(0, bData.cy, 0);
-			this.itemsGroup.add(bData.group);
-			this.butterflies.push(bData);
-		}
+		this.spawnBiomeAmbient(cols, rows, biomeType);
 
 		this.bot.x = levelData.start.x;
 		this.bot.y = levelData.start.y;
@@ -580,6 +561,577 @@ class GameEngine3D {
 
 		this.itemsGroup.add(group);
 		this.laserMeshes.push({ beam: beamMesh, light: light, x: c, y: r });
+	}
+
+	getBiomeConfig(biomeType) {
+		switch (biomeType) {
+			case 'campo':
+				return {
+					slabColor: 0xf1f5f9,
+					trimColor: 0x22c55e,
+					trimEmissive: 0x16a34a,
+					floorColor: 0xf8fafc,
+					wallColor: 0x166534,
+					wallCapColor: 0x22c55e,
+					wallRough: 0.75,
+					hemiSky: 0xf0fdf4,
+					hemiGround: 0xdcfce7,
+					sunColor: 0xfffbeb
+				};
+			case 'espacio':
+				return {
+					slabColor: 0x1e293b,
+					trimColor: 0x38bdf8,
+					trimEmissive: 0x0284c7,
+					floorColor: 0xf1f5f9,
+					wallColor: 0x334155,
+					wallCapColor: 0x0284c7,
+					wallRough: 0.35,
+					hemiSky: 0xe0f2fe,
+					hemiGround: 0xbae6fd,
+					sunColor: 0xffffff
+				};
+			case 'maquinas':
+				return {
+					slabColor: 0x292524,
+					trimColor: 0xf59e0b,
+					trimEmissive: 0xd97706,
+					floorColor: 0xfafaf9,
+					wallColor: 0x78350f,
+					wallCapColor: 0xd97706,
+					wallRough: 0.45,
+					hemiSky: 0xfef3c7,
+					hemiGround: 0xfde68a,
+					sunColor: 0xffedd5
+				};
+			case 'ciberespacio':
+				return {
+					slabColor: 0x0f172a,
+					trimColor: 0xec4899,
+					trimEmissive: 0xdb2777,
+					floorColor: 0xf8fafc,
+					wallColor: 0x312e81,
+					wallCapColor: 0xdb2777,
+					wallRough: 0.25,
+					hemiSky: 0xfdf2f8,
+					hemiGround: 0xfce7f3,
+					sunColor: 0xfff1f2
+				};
+			case 'cristal':
+				return {
+					slabColor: 0x064e3b,
+					trimColor: 0x10b981,
+					trimEmissive: 0x059669,
+					floorColor: 0xffffff,
+					wallColor: 0x065f46,
+					wallCapColor: 0x10b981,
+					wallRough: 0.2,
+					hemiSky: 0xecfdf5,
+					hemiGround: 0xd1fae5,
+					sunColor: 0xf0fdf4
+				};
+			default:
+				return this.getBiomeConfig('campo');
+		}
+	}
+
+	decorateWallBlock(c, r, posX, wallH, posZ, biomeType) {
+		const seed = (c * 23 + r * 37) % 10;
+		switch (biomeType) {
+			case 'campo':
+				if (seed <= 2) {
+					const tree = this.createTree(0.72 + (seed * 0.08), seed % 2);
+					tree.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(tree);
+				} else if (seed <= 6) {
+					const flowerColors = [0xfacc15, 0xf43f5e, 0xec4899, 0xa855f7, 0x38bdf8];
+					const flower1 = this.createFlower(flowerColors[(c + r) % flowerColors.length], 0.9);
+					flower1.position.set(posX - 0.18, wallH + 0.02, posZ - 0.12);
+					const flower2 = this.createFlower(flowerColors[(c * 3 + r) % flowerColors.length], 0.75);
+					flower2.position.set(posX + 0.16, wallH + 0.02, posZ + 0.15);
+					const grass = this.createGrassTuft(0.85);
+					grass.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(flower1, flower2, grass);
+				} else {
+					const grass1 = this.createGrassTuft(1.0);
+					grass1.position.set(posX - 0.14, wallH + 0.02, posZ + 0.12);
+					const grass2 = this.createGrassTuft(0.8);
+					grass2.position.set(posX + 0.15, wallH + 0.02, posZ - 0.14);
+					const flower = this.createFlower(0xfacc15, 0.8);
+					flower.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(grass1, grass2, flower);
+				}
+				break;
+			case 'espacio':
+				if (seed <= 3) {
+					const crystal = this.createSpaceCrystal(0.8 + (seed * 0.1));
+					crystal.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(crystal);
+					this.animatedBiomeObjects.push({
+						type: 'float',
+						mesh: crystal,
+						baseY: wallH + 0.02,
+						phase: seed * 1.2,
+						rotSpeed: 0.02
+					});
+				} else if (seed <= 6) {
+					const sat = this.createSatelliteDish();
+					sat.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(sat);
+				} else {
+					const beacon = this.createNeonBeacon(0x38bdf8);
+					beacon.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(beacon);
+				}
+				break;
+			case 'maquinas':
+				if (seed <= 3) {
+					const gear = this.createMechanicalGear(0.24, 8, 0xd97706);
+					gear.position.set(posX, wallH + 0.16, posZ);
+					gear.rotation.x = Math.PI / 2;
+					this.tilesGroup.add(gear);
+					this.animatedBiomeObjects.push({
+						type: 'gear',
+						mesh: gear,
+						speed: (seed % 2 === 0 ? 1 : -1) * 0.025
+					});
+				} else if (seed <= 6) {
+					const pipes = this.createPipeCluster();
+					pipes.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(pipes);
+				} else {
+					const vent = this.createSteamVent();
+					vent.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(vent);
+				}
+				break;
+			case 'ciberespacio':
+				if (seed <= 3) {
+					const cube = this.createDataCube(0.22, 0xec4899);
+					cube.position.set(posX, wallH + 0.22, posZ);
+					this.tilesGroup.add(cube);
+					this.animatedBiomeObjects.push({
+						type: 'float',
+						mesh: cube,
+						baseY: wallH + 0.22,
+						phase: seed * 1.5,
+						rotSpeed: 0.03
+					});
+				} else if (seed <= 6) {
+					const chip = this.createMicrochipTile();
+					chip.position.set(posX, wallH + 0.03, posZ);
+					this.tilesGroup.add(chip);
+				} else {
+					const beacon = this.createNeonBeacon(0xec4899);
+					beacon.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(beacon);
+				}
+				break;
+			case 'cristal':
+				if (seed <= 3) {
+					const cluster = this.createMysticCrystal(0.85);
+					cluster.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(cluster);
+					this.animatedBiomeObjects.push({
+						type: 'float',
+						mesh: cluster,
+						baseY: wallH + 0.02,
+						phase: seed * 1.3,
+						rotSpeed: 0.015
+					});
+				} else if (seed <= 6) {
+					const obelisk = this.createMiniObelisk();
+					obelisk.position.set(posX, wallH + 0.02, posZ);
+					this.tilesGroup.add(obelisk);
+				} else {
+					const orb = this.createEnergyOrb(0x10b981);
+					orb.position.set(posX, wallH + 0.18, posZ);
+					this.tilesGroup.add(orb);
+					this.animatedBiomeObjects.push({
+						type: 'pulse',
+						mesh: orb,
+						phase: seed * 0.9
+					});
+				}
+				break;
+		}
+	}
+
+	spawnBiomeAmbient(cols, rows, biomeType) {
+		const radiusX = (cols / 2) + 0.9;
+		const radiusZ = (rows / 2) + 0.9;
+
+		if (biomeType === 'campo') {
+			const butterflyColors = [0x38bdf8, 0xfb923c, 0xf472b6, 0xfacc15];
+			for (let i = 0; i < 4; i++) {
+				const bData = this.createButterfly(butterflyColors[i % butterflyColors.length]);
+				bData.cx = 0;
+				bData.cz = 0;
+				bData.cy = 0.95 + (i * 0.2);
+				bData.radiusX = radiusX - (i * 0.22);
+				bData.radiusZ = radiusZ - (i * 0.18);
+				bData.speed = (0.55 + (i * 0.15)) * (i % 2 === 0 ? 1 : -1);
+				bData.phase = (Math.PI * 2 * i) / 4;
+				bData.group.position.set(0, bData.cy, 0);
+				this.itemsGroup.add(bData.group);
+				this.butterflies.push(bData);
+			}
+		} else if (biomeType === 'espacio') {
+			for (let i = 0; i < 3; i++) {
+				const probe = new THREE.Group();
+				const pGeo = new THREE.SphereGeometry(0.09, 8, 8);
+				const pMat = new THREE.MeshStandardMaterial({
+					color: 0x38bdf8,
+					emissive: 0x0284c7,
+					emissiveIntensity: 0.8
+				});
+				probe.add(new THREE.Mesh(pGeo, pMat));
+				const ringGeo = new THREE.RingGeometry(0.13, 0.16, 12);
+				const ringMat = new THREE.MeshBasicMaterial({
+					color: 0x7dd3fc,
+					side: THREE.DoubleSide
+				});
+				const ring = new THREE.Mesh(ringGeo, ringMat);
+				ring.rotation.x = Math.PI / 3;
+				probe.add(ring);
+
+				this.itemsGroup.add(probe);
+				this.animatedBiomeObjects.push({
+					type: 'orbit',
+					mesh: probe,
+					cx: 0,
+					cz: 0,
+					cy: 1.1 + (i * 0.3),
+					radius: radiusX + 0.3 - (i * 0.2),
+					speed: (0.45 + (i * 0.15)) * (i % 2 === 0 ? 1 : -1),
+					phase: (Math.PI * 2 * i) / 3
+				});
+			}
+		} else if (biomeType === 'maquinas') {
+			for (let i = 0; i < 3; i++) {
+				const drone = new THREE.Group();
+				const bGeo = new THREE.SphereGeometry(0.08, 6, 6);
+				const bMat = new THREE.MeshStandardMaterial({
+					color: 0xd97706,
+					metalness: 0.8,
+					roughness: 0.3
+				});
+				drone.add(new THREE.Mesh(bGeo, bMat));
+
+				const propGeo = new THREE.BoxGeometry(0.24, 0.015, 0.04);
+				const propMat = new THREE.MeshStandardMaterial({
+					color: 0xf59e0b,
+					metalness: 0.6
+				});
+				const prop = new THREE.Mesh(propGeo, propMat);
+				prop.position.y = 0.09;
+				drone.add(prop);
+
+				this.itemsGroup.add(drone);
+				this.animatedBiomeObjects.push({
+					type: 'orbit',
+					mesh: drone,
+					cx: 0,
+					cz: 0,
+					cy: 1.0 + (i * 0.25),
+					radius: radiusX + 0.2 - (i * 0.2),
+					speed: (0.5 + (i * 0.15)) * (i % 2 === 0 ? 1 : -1),
+					phase: (Math.PI * 2 * i) / 3
+				});
+				this.animatedBiomeObjects.push({
+					type: 'gear',
+					mesh: prop,
+					speed: 0.25
+				});
+			}
+		} else if (biomeType === 'ciberespacio') {
+			for (let i = 0; i < 4; i++) {
+				const spark = new THREE.Group();
+				const sGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+				const sMat = new THREE.MeshStandardMaterial({
+					color: i % 2 === 0 ? 0xec4899 : 0x38bdf8,
+					emissive: i % 2 === 0 ? 0xec4899 : 0x38bdf8,
+					emissiveIntensity: 1.0
+				});
+				spark.add(new THREE.Mesh(sGeo, sMat));
+				this.itemsGroup.add(spark);
+				this.animatedBiomeObjects.push({
+					type: 'orbit',
+					mesh: spark,
+					cx: 0,
+					cz: 0,
+					cy: 1.05 + (i * 0.22),
+					radius: radiusX + 0.2 - (i * 0.2),
+					speed: (0.6 + (i * 0.12)) * (i % 2 === 0 ? 1 : -1),
+					phase: (Math.PI * 2 * i) / 4
+				});
+				this.animatedBiomeObjects.push({
+					type: 'float',
+					mesh: spark,
+					baseY: 1.05 + (i * 0.22),
+					phase: i * 1.5,
+					rotSpeed: 0.04
+				});
+			}
+		} else if (biomeType === 'cristal') {
+			for (let i = 0; i < 3; i++) {
+				const wisp = new THREE.Group();
+				const wGeo = new THREE.OctahedronGeometry(0.09, 0);
+				const wMat = new THREE.MeshStandardMaterial({
+					color: 0x10b981,
+					emissive: 0x34d399,
+					emissiveIntensity: 0.9,
+					roughness: 0.2
+				});
+				wisp.add(new THREE.Mesh(wGeo, wMat));
+				this.itemsGroup.add(wisp);
+				this.animatedBiomeObjects.push({
+					type: 'orbit',
+					mesh: wisp,
+					cx: 0,
+					cz: 0,
+					cy: 1.1 + (i * 0.26),
+					radius: radiusX + 0.3 - (i * 0.2),
+					speed: (0.45 + (i * 0.12)) * (i % 2 === 0 ? 1 : -1),
+					phase: (Math.PI * 2 * i) / 3
+				});
+				this.animatedBiomeObjects.push({
+					type: 'float',
+					mesh: wisp,
+					baseY: 1.1 + (i * 0.26),
+					phase: i * 1.8,
+					rotSpeed: 0.02
+				});
+			}
+		}
+	}
+
+	createSpaceCrystal(scale) {
+		const group = new THREE.Group();
+		const baseGeo = new THREE.CylinderGeometry(0.08 * scale, 0.1 * scale, 0.06 * scale, 6);
+		const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 });
+		const base = new THREE.Mesh(baseGeo, baseMat);
+		base.position.y = 0.03 * scale;
+		group.add(base);
+
+		const cryGeo = new THREE.OctahedronGeometry(0.18 * scale, 0);
+		const cryMat = new THREE.MeshStandardMaterial({
+			color: 0x38bdf8,
+			emissive: 0x0284c7,
+			emissiveIntensity: 0.6,
+			roughness: 0.15,
+			metalness: 0.2
+		});
+		const crystal = new THREE.Mesh(cryGeo, cryMat);
+		crystal.position.y = 0.22 * scale;
+		crystal.scale.set(0.7, 1.3, 0.7);
+		crystal.castShadow = true;
+		group.add(crystal);
+		return group;
+	}
+
+	createSatelliteDish() {
+		const group = new THREE.Group();
+		const poleGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 6);
+		const poleMat = new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.6 });
+		const pole = new THREE.Mesh(poleGeo, poleMat);
+		pole.position.y = 0.125;
+		group.add(pole);
+
+		const dishGeo = new THREE.ConeGeometry(0.14, 0.06, 8, 1, true);
+		const dishMat = new THREE.MeshStandardMaterial({
+			color: 0xe2e8f0,
+			metalness: 0.5,
+			roughness: 0.3,
+			side: THREE.DoubleSide
+		});
+		const dish = new THREE.Mesh(dishGeo, dishMat);
+		dish.position.set(0, 0.26, 0);
+		dish.rotation.x = Math.PI * 0.7;
+		group.add(dish);
+		return group;
+	}
+
+	createMechanicalGear(radius, teeth, colorHex) {
+		const group = new THREE.Group();
+		const hubGeo = new THREE.CylinderGeometry(radius, radius, 0.05, 12);
+		const gearMat = new THREE.MeshStandardMaterial({
+			color: colorHex,
+			metalness: 0.75,
+			roughness: 0.3
+		});
+		const hub = new THREE.Mesh(hubGeo, gearMat);
+		group.add(hub);
+
+		const toothGeo = new THREE.BoxGeometry(0.04, 0.05, radius * 0.4);
+		for (let i = 0; i < teeth; i++) {
+			const angle = (Math.PI * 2 * i) / teeth;
+			const tooth = new THREE.Mesh(toothGeo, gearMat);
+			tooth.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+			tooth.rotation.y = -angle;
+			group.add(tooth);
+		}
+		return group;
+	}
+
+	createPipeCluster() {
+		const group = new THREE.Group();
+		const pipeMat = new THREE.MeshStandardMaterial({
+			color: 0xb45309,
+			metalness: 0.8,
+			roughness: 0.35
+		});
+		const p1Geo = new THREE.CylinderGeometry(0.035, 0.035, 0.3, 8);
+		const p1 = new THREE.Mesh(p1Geo, pipeMat);
+		p1.position.set(-0.06, 0.15, 0);
+		const p2Geo = new THREE.CylinderGeometry(0.045, 0.045, 0.22, 8);
+		const p2 = new THREE.Mesh(p2Geo, pipeMat);
+		p2.position.set(0.07, 0.11, 0);
+		const jointGeo = new THREE.TorusGeometry(0.05, 0.015, 6, 8);
+		const joint = new THREE.Mesh(jointGeo, pipeMat);
+		joint.rotation.x = Math.PI / 2;
+		joint.position.set(0.07, 0.18, 0);
+		group.add(p1, p2, joint);
+		return group;
+	}
+
+	createSteamVent() {
+		const group = new THREE.Group();
+		const ventGeo = new THREE.BoxGeometry(0.24, 0.18, 0.24);
+		const ventMat = new THREE.MeshStandardMaterial({
+			color: 0x451a03,
+			metalness: 0.6,
+			roughness: 0.4
+		});
+		const vent = new THREE.Mesh(ventGeo, ventMat);
+		vent.position.y = 0.09;
+		const grillGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.04, 8);
+		const grillMat = new THREE.MeshStandardMaterial({
+			color: 0xf59e0b,
+			metalness: 0.7,
+			roughness: 0.3
+		});
+		const grill = new THREE.Mesh(grillGeo, grillMat);
+		grill.position.y = 0.19;
+		group.add(vent, grill);
+		return group;
+	}
+
+	createDataCube(size, colorHex) {
+		const group = new THREE.Group();
+		const cubeGeo = new THREE.BoxGeometry(size, size, size);
+		const cubeMat = new THREE.MeshStandardMaterial({
+			color: colorHex,
+			emissive: colorHex,
+			emissiveIntensity: 0.65,
+			roughness: 0.2,
+			metalness: 0.3,
+			transparent: true,
+			opacity: 0.85
+		});
+		const cube = new THREE.Mesh(cubeGeo, cubeMat);
+		cube.rotation.x = Math.PI / 4;
+		cube.rotation.y = Math.PI / 4;
+		group.add(cube);
+		return group;
+	}
+
+	createMicrochipTile() {
+		const group = new THREE.Group();
+		const plateGeo = new THREE.BoxGeometry(0.26, 0.03, 0.26);
+		const plateMat = new THREE.MeshStandardMaterial({
+			color: 0x1e1b4b,
+			roughness: 0.4,
+			metalness: 0.5
+		});
+		const plate = new THREE.Mesh(plateGeo, plateMat);
+		plate.position.y = 0.015;
+		const coreGeo = new THREE.BoxGeometry(0.14, 0.02, 0.14);
+		const coreMat = new THREE.MeshStandardMaterial({
+			color: 0xec4899,
+			emissive: 0xdb2777,
+			emissiveIntensity: 0.8
+		});
+		const core = new THREE.Mesh(coreGeo, coreMat);
+		core.position.y = 0.035;
+		group.add(plate, core);
+		return group;
+	}
+
+	createNeonBeacon(colorHex) {
+		const group = new THREE.Group();
+		const baseGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.08, 8);
+		const baseMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5 });
+		const base = new THREE.Mesh(baseGeo, baseMat);
+		base.position.y = 0.04;
+		const lightGeo = new THREE.SphereGeometry(0.06, 8, 8);
+		const lightMat = new THREE.MeshStandardMaterial({
+			color: colorHex,
+			emissive: colorHex,
+			emissiveIntensity: 1.1
+		});
+		const light = new THREE.Mesh(lightGeo, lightMat);
+		light.position.y = 0.12;
+		group.add(base, light);
+		return group;
+	}
+
+	createMysticCrystal(scale) {
+		const group = new THREE.Group();
+		const cryMat = new THREE.MeshStandardMaterial({
+			color: 0x10b981,
+			emissive: 0x059669,
+			emissiveIntensity: 0.55,
+			roughness: 0.15,
+			metalness: 0.1
+		});
+		const geo1 = new THREE.ConeGeometry(0.08 * scale, 0.3 * scale, 5);
+		const m1 = new THREE.Mesh(geo1, cryMat);
+		m1.position.set(0, 0.15 * scale, 0);
+		const geo2 = new THREE.ConeGeometry(0.06 * scale, 0.22 * scale, 5);
+		const m2 = new THREE.Mesh(geo2, cryMat);
+		m2.position.set(0.08 * scale, 0.11 * scale, 0.03 * scale);
+		m2.rotation.z = -0.3;
+		const geo3 = new THREE.ConeGeometry(0.05 * scale, 0.18 * scale, 5);
+		const m3 = new THREE.Mesh(geo3, cryMat);
+		m3.position.set(-0.07 * scale, 0.09 * scale, -0.04 * scale);
+		m3.rotation.z = 0.35;
+		group.add(m1, m2, m3);
+		return group;
+	}
+
+	createMiniObelisk() {
+		const group = new THREE.Group();
+		const colGeo = new THREE.BoxGeometry(0.12, 0.3, 0.12);
+		const colMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 });
+		const col = new THREE.Mesh(colGeo, colMat);
+		col.position.y = 0.15;
+		const topGeo = new THREE.ConeGeometry(0.085, 0.1, 4);
+		const topMat = new THREE.MeshStandardMaterial({
+			color: 0xfacc15,
+			metalness: 0.8,
+			roughness: 0.2
+		});
+		const top = new THREE.Mesh(topGeo, topMat);
+		top.position.y = 0.35;
+		top.rotation.y = Math.PI / 4;
+		group.add(col, top);
+		return group;
+	}
+
+	createEnergyOrb(colorHex) {
+		const group = new THREE.Group();
+		const orbGeo = new THREE.SphereGeometry(0.09, 12, 12);
+		const orbMat = new THREE.MeshStandardMaterial({
+			color: colorHex,
+			emissive: colorHex,
+			emissiveIntensity: 0.9,
+			transparent: true,
+			opacity: 0.85
+		});
+		const orb = new THREE.Mesh(orbGeo, orbMat);
+		group.add(orb);
+		return group;
 	}
 
 	createTree(scale, variant) {
@@ -1043,6 +1595,23 @@ class GameEngine3D {
 			const flap = Math.sin(timestamp * 0.024 + b.phase) * 0.7;
 			b.leftWing.rotation.z = flap;
 			b.rightWing.rotation.z = -flap;
+		}
+
+		for (const obj of this.animatedBiomeObjects) {
+			if (obj.type === 'gear') {
+				obj.mesh.rotation.z += obj.speed;
+			} else if (obj.type === 'float') {
+				obj.mesh.position.y = obj.baseY + Math.sin(timestamp * 0.003 + obj.phase) * 0.08;
+				obj.mesh.rotation.y += obj.rotSpeed || 0.015;
+			} else if (obj.type === 'pulse') {
+				const s = 1.0 + Math.sin(timestamp * 0.005 + obj.phase) * 0.12;
+				obj.mesh.scale.set(s, s, s);
+			} else if (obj.type === 'orbit') {
+				const t = timestamp * 0.001 * obj.speed + obj.phase;
+				obj.mesh.position.x = obj.cx + Math.cos(t) * obj.radius;
+				obj.mesh.position.z = obj.cz + Math.sin(t) * obj.radius;
+				obj.mesh.position.y = obj.cy + Math.sin(timestamp * 0.003 + obj.phase) * 0.15;
+			}
 		}
 
 		for (const c of this.cores) {
