@@ -31,6 +31,7 @@ class GameEngine3D {
 		this.laserTimer = 0;
 		this.laserMeshes = [];
 		this.gateMeshes = [];
+		this.butterflies = [];
 
 		this.zoomMultiplier = 1.0;
 		this.focusOnBot = false;
@@ -66,14 +67,14 @@ class GameEngine3D {
 		this.camera.position.set(12, 22, 12);
 		this.camera.lookAt(0, 0, 0);
 
-		const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+		const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
 		this.scene.add(ambientLight);
 
-		const hemiLight = new THREE.HemisphereLight(0xf8fafc, 0xe2e8f0, 0.55);
+		const hemiLight = new THREE.HemisphereLight(0xf0fdf4, 0xdcfce7, 0.65);
 		hemiLight.position.set(0, 20, 0);
 		this.scene.add(hemiLight);
 
-		this.sunLight = new THREE.DirectionalLight(0xfffbeb, 1.15);
+		this.sunLight = new THREE.DirectionalLight(0xfffbeb, 1.25);
 		this.sunLight.position.set(12, 22, 10);
 		this.sunLight.castShadow = true;
 		this.sunLight.shadow.mapSize.width = 2048;
@@ -176,6 +177,7 @@ class GameEngine3D {
 		this.batteries = [];
 		this.laserMeshes = [];
 		this.gateMeshes = [];
+		this.butterflies = [];
 
 		while (this.tilesGroup.children.length > 0) {
 			const obj = this.tilesGroup.children[0];
@@ -220,9 +222,9 @@ class GameEngine3D {
 
 		const trimGeo = new THREE.BoxGeometry(platW + 0.06, 0.04, platD + 0.06);
 		const trimMat = new THREE.MeshStandardMaterial({
-			color: 0x38bdf8,
-			emissive: 0x0284c7,
-			emissiveIntensity: 0.5,
+			color: 0x22c55e,
+			emissive: 0x16a34a,
+			emissiveIntensity: 0.4,
 			roughness: 0.2
 		});
 		const trimMesh = new THREE.Mesh(trimGeo, trimMat);
@@ -254,14 +256,19 @@ class GameEngine3D {
 
 		const floorGeo = new THREE.BoxGeometry(0.96, 0.22, 0.96);
 		const floorMat = new THREE.MeshStandardMaterial({
-			color: 0xffffff,
-			roughness: 0.25,
-			metalness: 0.05
+			color: 0xf8fafc,
+			roughness: 0.28,
+			metalness: 0.04
 		});
 		const wallMat = new THREE.MeshStandardMaterial({
-			color: 0x475569,
-			roughness: 0.35,
-			metalness: 0.25
+			color: 0x166534,
+			roughness: 0.75,
+			metalness: 0.05
+		});
+		const wallCapMat = new THREE.MeshStandardMaterial({
+			color: 0x22c55e,
+			roughness: 0.45,
+			metalness: 0.05
 		});
 		const pitMat = new THREE.MeshStandardMaterial({
 			color: 0x0f172a,
@@ -282,17 +289,37 @@ class GameEngine3D {
 					wallMesh.castShadow = true;
 					wallMesh.receiveShadow = true;
 
-					const capGeo = new THREE.BoxGeometry(0.84, 0.04, 0.84);
-					const capMat = new THREE.MeshStandardMaterial({
-						color: 0x64748b,
-						roughness: 0.25,
-						metalness: 0.2
-					});
-					const capMesh = new THREE.Mesh(capGeo, capMat);
-					capMesh.position.set(posX, wallH - 0.01, posZ);
+					const capGeo = new THREE.BoxGeometry(0.92, 0.05, 0.92);
+					const capMesh = new THREE.Mesh(capGeo, wallCapMat);
+					capMesh.position.set(posX, wallH - 0.005, posZ);
 					capMesh.castShadow = true;
+					capMesh.receiveShadow = true;
 
 					this.tilesGroup.add(wallMesh, capMesh);
+
+					const seed = (c * 23 + r * 37) % 10;
+					if (seed <= 2) {
+						const tree = this.createTree(0.72 + (seed * 0.08), seed % 2);
+						tree.position.set(posX, wallH + 0.02, posZ);
+						this.tilesGroup.add(tree);
+					} else if (seed <= 6) {
+						const flowerColors = [0xfacc15, 0xf43f5e, 0xec4899, 0xa855f7, 0x38bdf8];
+						const flower1 = this.createFlower(flowerColors[(c + r) % flowerColors.length], 0.9);
+						flower1.position.set(posX - 0.18, wallH + 0.02, posZ - 0.12);
+						const flower2 = this.createFlower(flowerColors[(c * 3 + r) % flowerColors.length], 0.75);
+						flower2.position.set(posX + 0.16, wallH + 0.02, posZ + 0.15);
+						const grass = this.createGrassTuft(0.85);
+						grass.position.set(posX, wallH + 0.02, posZ);
+						this.tilesGroup.add(flower1, flower2, grass);
+					} else {
+						const grass1 = this.createGrassTuft(1.0);
+						grass1.position.set(posX - 0.14, wallH + 0.02, posZ + 0.12);
+						const grass2 = this.createGrassTuft(0.8);
+						grass2.position.set(posX + 0.15, wallH + 0.02, posZ - 0.14);
+						const flower = this.createFlower(0xfacc15, 0.8);
+						flower.position.set(posX, wallH + 0.02, posZ);
+						this.tilesGroup.add(grass1, grass2, flower);
+					}
 				} else if (tileType === 3) {
 					const pitGeo = new THREE.BoxGeometry(0.96, 0.6, 0.96);
 					const pitMesh = new THREE.Mesh(pitGeo, pitMat);
@@ -315,6 +342,25 @@ class GameEngine3D {
 					}
 				}
 			}
+		}
+
+		const butterflyColors = [0x38bdf8, 0xfb923c, 0xf472b6, 0xfacc15];
+		const numButterflies = 4;
+		const radiusX = (cols / 2) + 0.9;
+		const radiusZ = (rows / 2) + 0.9;
+
+		for (let i = 0; i < numButterflies; i++) {
+			const bData = this.createButterfly(butterflyColors[i % butterflyColors.length]);
+			bData.cx = 0;
+			bData.cz = 0;
+			bData.cy = 0.95 + (i * 0.2);
+			bData.radiusX = radiusX - (i * 0.22);
+			bData.radiusZ = radiusZ - (i * 0.18);
+			bData.speed = (0.55 + (i * 0.15)) * (i % 2 === 0 ? 1 : -1);
+			bData.phase = (Math.PI * 2 * i) / numButterflies;
+			bData.group.position.set(0, bData.cy, 0);
+			this.itemsGroup.add(bData.group);
+			this.butterflies.push(bData);
 		}
 
 		this.bot.x = levelData.start.x;
@@ -534,6 +580,144 @@ class GameEngine3D {
 
 		this.itemsGroup.add(group);
 		this.laserMeshes.push({ beam: beamMesh, light: light, x: c, y: r });
+	}
+
+	createTree(scale, variant) {
+		const group = new THREE.Group();
+		const trunkH = 0.35 * scale;
+		const trunkGeo = new THREE.CylinderGeometry(0.06 * scale, 0.08 * scale, trunkH, 8);
+		const trunkMat = new THREE.MeshStandardMaterial({
+			color: 0x854d0e,
+			roughness: 0.85
+		});
+		const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+		trunk.position.y = trunkH / 2;
+		trunk.castShadow = true;
+		group.add(trunk);
+
+		const foliageColors = [0x22c55e, 0x16a34a, 0x4ade80];
+		const folColor = foliageColors[variant % foliageColors.length];
+		const folMat = new THREE.MeshStandardMaterial({
+			color: folColor,
+			roughness: 0.55,
+			metalness: 0.05
+		});
+
+		if (variant === 1) {
+			const folGeo1 = new THREE.ConeGeometry(0.28 * scale, 0.36 * scale, 7);
+			const m1 = new THREE.Mesh(folGeo1, folMat);
+			m1.position.y = trunkH + 0.14 * scale;
+			m1.castShadow = true;
+			const folGeo2 = new THREE.ConeGeometry(0.2 * scale, 0.3 * scale, 7);
+			const m2 = new THREE.Mesh(folGeo2, folMat);
+			m2.position.y = trunkH + 0.32 * scale;
+			m2.castShadow = true;
+			group.add(m1, m2);
+		} else {
+			const folGeo = new THREE.DodecahedronGeometry(0.26 * scale, 1);
+			const m = new THREE.Mesh(folGeo, folMat);
+			m.position.y = trunkH + 0.2 * scale;
+			m.castShadow = true;
+			group.add(m);
+		}
+
+		return group;
+	}
+
+	createFlower(colorHex, scale) {
+		const group = new THREE.Group();
+		const stemH = 0.12 * scale;
+		const stemGeo = new THREE.CylinderGeometry(0.012 * scale, 0.012 * scale, stemH, 5);
+		const stemMat = new THREE.MeshStandardMaterial({
+			color: 0x15803d,
+			roughness: 0.8
+		});
+		const stem = new THREE.Mesh(stemGeo, stemMat);
+		stem.position.y = stemH / 2;
+		group.add(stem);
+
+		const petalGeo = new THREE.CylinderGeometry(0.045 * scale, 0.045 * scale, 0.015 * scale, 5);
+		const petalMat = new THREE.MeshStandardMaterial({
+			color: colorHex,
+			roughness: 0.35,
+			metalness: 0.1
+		});
+		const petals = new THREE.Mesh(petalGeo, petalMat);
+		petals.position.y = stemH + 0.005 * scale;
+		petals.rotation.x = Math.PI / 8;
+
+		const centerGeo = new THREE.SphereGeometry(0.018 * scale, 6, 6);
+		const centerMat = new THREE.MeshStandardMaterial({
+			color: 0xfacc15,
+			roughness: 0.3
+		});
+		const center = new THREE.Mesh(centerGeo, centerMat);
+		center.position.y = stemH + 0.015 * scale;
+
+		group.add(petals, center);
+		return group;
+	}
+
+	createGrassTuft(scale) {
+		const group = new THREE.Group();
+		const bladeGeo = new THREE.ConeGeometry(0.025 * scale, 0.14 * scale, 4);
+		const bladeMat = new THREE.MeshStandardMaterial({
+			color: 0x4ade80,
+			roughness: 0.45
+		});
+
+		for (let i = 0; i < 3; i++) {
+			const blade = new THREE.Mesh(bladeGeo, bladeMat);
+			blade.position.set((i - 1) * 0.035 * scale, 0.07 * scale, 0);
+			blade.rotation.z = (i - 1) * 0.25;
+			blade.rotation.y = i * 0.8;
+			group.add(blade);
+		}
+		return group;
+	}
+
+	createButterfly(wingColorHex) {
+		const group = new THREE.Group();
+		const bodyGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.09, 6);
+		const bodyMat = new THREE.MeshStandardMaterial({
+			color: 0x1e293b,
+			roughness: 0.8
+		});
+		const body = new THREE.Mesh(bodyGeo, bodyMat);
+		body.rotation.x = Math.PI / 2;
+		group.add(body);
+
+		const wingMat = new THREE.MeshStandardMaterial({
+			color: wingColorHex,
+			emissive: wingColorHex,
+			emissiveIntensity: 0.25,
+			roughness: 0.35,
+			side: THREE.DoubleSide
+		});
+
+		const leftPivot = new THREE.Group();
+		leftPivot.position.set(-0.012, 0.005, 0);
+		const leftWingGeo = new THREE.CircleGeometry(0.075, 5);
+		const leftWing = new THREE.Mesh(leftWingGeo, wingMat);
+		leftWing.position.set(-0.065, 0, 0);
+		leftWing.rotation.x = -Math.PI / 2;
+		leftPivot.add(leftWing);
+
+		const rightPivot = new THREE.Group();
+		rightPivot.position.set(0.012, 0.005, 0);
+		const rightWingGeo = new THREE.CircleGeometry(0.075, 5);
+		const rightWing = new THREE.Mesh(rightWingGeo, wingMat);
+		rightWing.position.set(0.065, 0, 0);
+		rightWing.rotation.x = -Math.PI / 2;
+		rightPivot.add(rightWing);
+
+		group.add(leftPivot, rightPivot);
+
+		return {
+			group: group,
+			leftWing: leftPivot,
+			rightWing: rightPivot
+		};
 	}
 
 	getAngleFromDir(dir) {
@@ -848,6 +1032,17 @@ class GameEngine3D {
 		if (this.laserTimer % 90 === 0) {
 			this.laserState = !this.laserState;
 			this.updateLaserVisuals();
+		}
+
+		for (const b of this.butterflies) {
+			const t = timestamp * 0.0012 * b.speed + b.phase;
+			b.group.position.x = b.cx + Math.cos(t) * b.radiusX;
+			b.group.position.z = b.cz + Math.sin(t) * b.radiusZ;
+			b.group.position.y = b.cy + Math.sin(timestamp * 0.004 + b.phase) * 0.18;
+			b.group.rotation.y = -t + (b.speed > 0 ? Math.PI / 2 : -Math.PI / 2);
+			const flap = Math.sin(timestamp * 0.024 + b.phase) * 0.7;
+			b.leftWing.rotation.z = flap;
+			b.rightWing.rotation.z = -flap;
 		}
 
 		for (const c of this.cores) {
