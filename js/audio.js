@@ -238,6 +238,20 @@ const SoundFX = {
 				this.playTone(freq, freq, 'triangle', 0.2, 0.18);
 			}, idx * 60);
 		});
+	},
+
+	playFall() {
+		if (!this.enabled) return;
+		this.initContext();
+		if (!this.ctx) return;
+		this.playTone(600, 65, 'sawtooth', 0.45, 0.2);
+	},
+
+	playSquash() {
+		if (!this.enabled) return;
+		this.initContext();
+		if (!this.ctx) return;
+		this.playTone(240, 40, 'triangle', 0.28, 0.25);
 	}
 };
 

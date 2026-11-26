@@ -17,7 +17,11 @@ class GameEngine {
 			jumpHeight: 0,
 			memory: 0,
 			walkFrame: 0,
-			isWalking: false
+			isWalking: false,
+			scaleX: 1,
+			scaleY: 1,
+			alpha: 1,
+			rotationOffset: 0
 		};
 		this.animating = false;
 		this.animationStart = 0;
@@ -63,6 +67,10 @@ class GameEngine {
 		this.bot.renderAngle = this.bot.dir * (Math.PI / 2);
 		this.bot.jumpHeight = 0;
 		this.bot.memory = 0;
+		this.bot.scaleX = 1;
+		this.bot.scaleY = 1;
+		this.bot.alpha = 1;
+		this.bot.rotationOffset = 0;
 		this.animating = false;
 		this.laserState = true;
 		this.laserTimer = 0;
@@ -96,6 +104,10 @@ class GameEngine {
 		this.bot.jumpHeight = 0;
 		this.bot.isWalking = false;
 		this.bot.walkFrame = 0;
+		this.bot.scaleX = 1;
+		this.bot.scaleY = 1;
+		this.bot.alpha = 1;
+		this.bot.rotationOffset = 0;
 		if (this.animationResolve) {
 			const res = this.animationResolve;
 			this.animationResolve = null;
@@ -281,7 +293,7 @@ class GameEngine {
 			jump: false
 		}).then(async () => {
 			if (tile === 3) {
-				if (window.SoundFX) window.SoundFX.playError();
+				await this.animateFall();
 				throw new Error("¡Cuidado! BIT cayó en una baldosa rota. Usa el sensor para saltar.");
 			}
 			await this.tickPhysics();
@@ -364,6 +376,13 @@ class GameEngine {
 			fromAngle: this.bot.renderAngle,
 			toAngle: this.bot.dir * (Math.PI / 2),
 			jump: true
+		}).then(async () => {
+			const landingTile = this.grid[target.y][target.x];
+			if (landingTile === 3) {
+				await this.animateFall();
+				throw new Error("¡Cuidado! BIT cayó en una baldosa rota. Usa el sensor para saltar.");
+			}
+			await this.tickPhysics();
 		});
 	}
 
@@ -436,7 +455,7 @@ class GameEngine {
 					const below = this.grid[r + 1][c];
 					if (below === 0) {
 						if (this.bot.x === c && this.bot.y === r + 1) {
-							if (window.SoundFX) window.SoundFX.playError();
+							await this.animateSquash();
 							throw new Error("¡Aplastado! Un componente pesado cayó sobre BIT.");
 						}
 						this.grid[r][c] = 0;
@@ -548,6 +567,53 @@ class GameEngine {
 				life: 25 + Math.random() * 15
 			});
 		}
+	}
+
+	animateFall() {
+		if (window.SoundFX) window.SoundFX.playFall();
+		return new Promise(resolve => {
+			const raf = (typeof window !== 'undefined' && window.requestAnimationFrame) || (typeof requestAnimationFrame !== 'undefined' ? requestAnimationFrame : null);
+			if (!raf) return resolve();
+			const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+			const duration = 400;
+			const tick = (now) => {
+				const elapsed = now - start;
+				const p = Math.min(elapsed / duration, 1);
+				this.bot.scaleX = Math.max(0.01, 1 - p * 0.95);
+				this.bot.scaleY = Math.max(0.01, 1 - p * 0.95);
+				this.bot.alpha = Math.max(0, 1 - p);
+				this.bot.rotationOffset = p * Math.PI * 4;
+				if (p < 1) {
+					raf(tick);
+				} else {
+					resolve();
+				}
+			};
+			raf(tick);
+		});
+	}
+
+	animateSquash() {
+		if (window.SoundFX) window.SoundFX.playSquash();
+		this.spawnExplosionParticles(this.bot.x, this.bot.y);
+		return new Promise(resolve => {
+			const raf = (typeof window !== 'undefined' && window.requestAnimationFrame) || (typeof requestAnimationFrame !== 'undefined' ? requestAnimationFrame : null);
+			if (!raf) return resolve();
+			const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+			const duration = 300;
+			const tick = (now) => {
+				const elapsed = now - start;
+				const p = Math.min(elapsed / duration, 1);
+				this.bot.scaleY = Math.max(0.12, 1 - p * 0.85);
+				this.bot.scaleX = 1 + p * 0.55;
+				if (p < 1) {
+					raf(tick);
+				} else {
+					resolve();
+				}
+			};
+			raf(tick);
+		});
 	}
 
 	startAnimation(animData) {
@@ -930,7 +996,11 @@ class GameEngine {
 			isWalking: this.bot.isWalking,
 			jumpHeight: this.bot.jumpHeight,
 			isTurning: this.animating && this.animFrom && (this.animFrom.fromAngle !== this.animFrom.toAngle),
-			time: performance.now()
+			time: performance.now(),
+			scaleX: this.bot.scaleX,
+			scaleY: this.bot.scaleY,
+			alpha: this.bot.alpha,
+			rotationOffset: this.bot.rotationOffset
 		});
 	}
 }

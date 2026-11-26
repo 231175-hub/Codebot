@@ -2343,6 +2343,9 @@ class GameEngine3D {
 		this.bot.renderY = this.bot.y;
 		this.bot.renderAngle = this.getAngleFromDir(this.bot.dir);
 		this.bot.jumpHeight = 0;
+		if (this.bot3D && this.bot3D.group) {
+			this.bot3D.group.scale.set(1, 1, 1);
+		}
 		this.updateBot3DPosition();
 		if (this.animationResolve) {
 			const res = this.animationResolve;
@@ -2533,7 +2536,7 @@ class GameEngine3D {
 			jump: false
 		}).then(async () => {
 			if (tile === 3) {
-				if (window.SoundFX) window.SoundFX.playError();
+				await this.animateFall3D();
 				throw new Error("¡Cuidado! BIT cayó en una baldosa rota. Usa el sensor para saltar.");
 			}
 			await this.tickPhysics();
@@ -2621,6 +2624,13 @@ class GameEngine3D {
 			fromAngle: this.bot.renderAngle,
 			toAngle: this.getAngleFromDir(this.bot.dir),
 			jump: true
+		}).then(async () => {
+			const landingTile = this.grid[target.y][target.x];
+			if (landingTile === 3) {
+				await this.animateFall3D();
+				throw new Error("¡Cuidado! BIT cayó en una baldosa rota. Usa el sensor para saltar.");
+			}
+			await this.tickPhysics();
 		});
 	}
 
@@ -2722,7 +2732,7 @@ class GameEngine3D {
 					const below = this.grid[r + 1][c];
 					if (below === 0) {
 						if (this.bot.x === c && this.bot.y === r + 1) {
-							if (window.SoundFX) window.SoundFX.playError();
+							await this.animateSquash3D();
 							throw new Error("¡Aplastado! Un componente pesado cayó sobre BIT.");
 						}
 						this.grid[r][c] = 0;
@@ -2800,6 +2810,54 @@ class GameEngine3D {
 			}
 		}
 		this.refreshSupaplexMeshes();
+	}
+
+	animateFall3D() {
+		if (window.SoundFX) window.SoundFX.playFall();
+		return new Promise((resolve) => {
+			const raf = (typeof window !== 'undefined' && window.requestAnimationFrame) || (typeof requestAnimationFrame !== 'undefined' ? requestAnimationFrame : null);
+			if (!raf || !this.bot3D || !this.bot3D.group) return resolve();
+			const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+			const duration = 450;
+			const initialY = this.bot3D.group.position.y;
+			const initialRot = this.bot3D.group.rotation.y;
+			const tick = (now) => {
+				const elapsed = now - start;
+				const p = Math.min(elapsed / duration, 1);
+				this.bot3D.group.position.y = initialY - p * 2.2;
+				const s = Math.max(0.01, 1 - p * 0.95);
+				this.bot3D.group.scale.set(s, s, s);
+				this.bot3D.group.rotation.y = initialRot + p * Math.PI * 4;
+				if (p < 1) {
+					raf(tick);
+				} else {
+					resolve();
+				}
+			};
+			raf(tick);
+		});
+	}
+
+	animateSquash3D() {
+		if (window.SoundFX) window.SoundFX.playSquash();
+		this.spawnCoreParticles3D(this.bot.x - (this.grid[0].length - 1) / 2, this.bot.y - (this.grid.length - 1) / 2);
+		return new Promise((resolve) => {
+			const raf = (typeof window !== 'undefined' && window.requestAnimationFrame) || (typeof requestAnimationFrame !== 'undefined' ? requestAnimationFrame : null);
+			if (!raf || !this.bot3D || !this.bot3D.group) return resolve();
+			const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+			const duration = 300;
+			const tick = (now) => {
+				const elapsed = now - start;
+				const p = Math.min(elapsed / duration, 1);
+				this.bot3D.group.scale.set(1 + p * 0.55, Math.max(0.12, 1 - p * 0.85), 1 + p * 0.55);
+				if (p < 1) {
+					raf(tick);
+				} else {
+					resolve();
+				}
+			};
+			raf(tick);
+		});
 	}
 
 	startAnimation(anim) {
