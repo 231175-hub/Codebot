@@ -344,7 +344,9 @@ const App = {
 
 	isLevelAvailable(index) {
 		const level = LEVELS[index];
-		return Boolean(level && (index <= this.state.unlockedLevel || Number(this.state.stars[level.id]) > 0));
+		if (!level) return false;
+		if (level.id === '7.1') return true;
+		return Boolean(index <= this.state.unlockedLevel || Number(this.state.stars[level.id]) > 0);
 	},
 
 	updateMapStats() {
@@ -823,6 +825,8 @@ const App = {
 			checkPitAhead: () => this.engine.checkPitAhead(),
 			checkWallAhead: () => this.engine.checkWallAhead(),
 			checkLaserAhead: () => this.engine.checkLaserAhead(),
+			checkDangerAbove: () => this.engine.checkDangerAbove ? this.engine.checkDangerAbove() : false,
+			checkAheadType: (type) => this.engine.checkAheadType ? this.engine.checkAheadType(type) : false,
 			isAtGoal: () => matrix ? matrix.isSolved() : this.engine.isAtGoal(),
 			bot: this.engine.bot
 		};
@@ -985,7 +989,8 @@ const App = {
 			3: '#16a34a',
 			4: '#0d9488',
 			5: '#7c3aed',
-			6: '#fb7185'
+			6: '#fb7185',
+			7: '#059669'
 		};
 
 		LEVELS.forEach((level, idx) => {

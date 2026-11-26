@@ -59,7 +59,7 @@ const MapLife = {
 	},
 
 	drawWalker(ctx, planet, time, reducedMotion) {
-		const alien = this.crew[planet.index];
+		const alien = this.crew[planet.index % this.crew.length];
 		const phase = time / 4200 + planet.index * 1.65 + 0.4;
 		const offset = Math.sin(phase) * 46;
 		const surface = planet.y - Math.sqrt(planet.radius ** 2 - offset ** 2);
@@ -91,7 +91,7 @@ const MapLife = {
 	},
 
 	drawTraffic(ctx, route, index, time) {
-		const ship = this.ships[index];
+		const ship = this.ships[index % this.ships.length];
 		const pilot = this.crew[(index + 2) % this.crew.length];
 		const phase = time / (5000 + index * 560) + index * 2.6 - 0.55;
 		const point = MapMotion.cubicPoint(route, 0.5 + 0.31 * Math.sin(phase));

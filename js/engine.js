@@ -42,6 +42,9 @@ class GameEngine {
 		this.cores = [];
 		this.batteries = [];
 		this.particles = [];
+		this.infotronsCollected = 0;
+		this.infotronsRequired = levelData.infotronsRequired || 0;
+		this.exitUnlocked = this.infotronsRequired === 0;
 		for (let r = 0; r < this.grid.length; r++) {
 			for (let c = 0; c < this.grid[r].length; c++) {
 				const tile = this.grid[r][c];
@@ -133,11 +136,60 @@ class GameEngine {
 		return this.grid[target.y][target.x] === 6 && this.laserState;
 	}
 
+	checkDangerAbove() {
+		if (this.bot.y <= 0) return false;
+		const directlyAbove = this.grid[this.bot.y - 1][this.bot.x];
+		if (directlyAbove === 8 || directlyAbove === 9 || directlyAbove === 13) return true;
+		if (this.bot.x > 0) {
+			const leftAbove = this.grid[this.bot.y - 1][this.bot.x - 1];
+			if ((leftAbove === 8 || leftAbove === 9) && this.grid[this.bot.y][this.bot.x - 1] !== 0) return true;
+		}
+		if (this.bot.x < this.grid[0].length - 1) {
+			const rightAbove = this.grid[this.bot.y - 1][this.bot.x + 1];
+			if ((rightAbove === 8 || rightAbove === 9) && this.grid[this.bot.y][this.bot.x + 1] !== 0) return true;
+		}
+		return false;
+	}
+
+	checkAheadType(expectedType) {
+		const ahead = this.getAheadCoordinates();
+		if (this.isOutOfBounds(ahead.x, ahead.y)) {
+			return expectedType === 'muro';
+		}
+		const tile = this.grid[ahead.y][ahead.x];
+		const typeNames = {
+			0: 'vacio',
+			1: 'muro',
+			7: 'pista',
+			8: 'zonk',
+			9: 'infotron',
+			10: 'salida',
+			13: 'disco',
+			15: 'enemigo',
+			16: 'enemigo'
+		};
+		const currentType = typeNames[tile] || 'otro';
+		return currentType === expectedType;
+	}
+
 	isAtGoal() {
+		if (this.level && this.level.infotronsRequired > 0) {
+			const onExit = this.grid[this.bot.y][this.bot.x] === 10 || (this.level.exit && this.bot.x === this.level.exit.x && this.bot.y === this.level.exit.y);
+			return onExit && (this.infotronsCollected >= this.infotronsRequired);
+		}
+		if (this.grid[this.bot.y][this.bot.x] === 10) {
+			return true;
+		}
+		if (this.cores.length > 0 && this.areAllCoresActive()) {
+			return true;
+		}
 		return this.cores.some(c => c.x === this.bot.x && c.y === this.bot.y);
 	}
 
 	areAllCoresActive() {
+		if (this.level && this.level.infotronsRequired > 0) {
+			return this.infotronsCollected >= this.infotronsRequired;
+		}
 		if (this.cores.length === 0) return true;
 		return this.cores.every(c => c.active);
 	}
@@ -164,6 +216,10 @@ class GameEngine {
 				return this.performAddMemory(arg || 1);
 			case 'esperar':
 				return this.performWait();
+			case 'despejar':
+				return this.performClear();
+			case 'empujar':
+				return this.performPush();
 			default:
 				return Promise.resolve();
 		}
@@ -178,6 +234,15 @@ class GameEngine {
 		if (tile === 1) {
 			throw new Error("¡Ouch! BIT intentó avanzar, pero había un muro frente a él.");
 		}
+		if (tile === 8) {
+			throw new Error("¡Bloqueado! Un componente pesado bloquea el paso. Usa empujar si hay espacio libre detrás.");
+		}
+		if (tile === 13) {
+			throw new Error("¡Peligro! Un disco de impacto bloquea el paso.");
+		}
+		if (tile === 15 || tile === 16) {
+			throw new Error("¡Alerta! BIT colisionó contra una entidad enemiga.");
+		}
 		if (tile === 6 && this.laserState) {
 			throw new Error("¡Alerta! BIT intentó cruzar una barrera láser activa.");
 		}
@@ -190,7 +255,22 @@ class GameEngine {
 		const fromY = this.bot.y;
 		this.bot.x = ahead.x;
 		this.bot.y = ahead.y;
-		if (window.SoundFX) window.SoundFX.playStep();
+		if (tile === 7) {
+			this.grid[ahead.y][ahead.x] = 0;
+			if (window.SoundFX) window.SoundFX.playMunch();
+			this.spawnCircuitParticles(ahead.x, ahead.y);
+		} else if (tile === 9) {
+			this.grid[ahead.y][ahead.x] = 0;
+			this.infotronsCollected += 1;
+			if (window.SoundFX) window.SoundFX.playInfotron();
+			this.spawnCoreParticles(ahead.x, ahead.y);
+			if (this.infotronsRequired > 0 && this.infotronsCollected >= this.infotronsRequired && !this.exitUnlocked) {
+				this.exitUnlocked = true;
+				if (window.SoundFX) window.SoundFX.playExitReady();
+			}
+		} else {
+			if (window.SoundFX) window.SoundFX.playStep();
+		}
 		return this.startAnimation({
 			fromX: fromX,
 			fromY: fromY,
@@ -199,12 +279,61 @@ class GameEngine {
 			fromAngle: this.bot.renderAngle,
 			toAngle: this.bot.dir * (Math.PI / 2),
 			jump: false
-		}).then(() => {
+		}).then(async () => {
 			if (tile === 3) {
 				if (window.SoundFX) window.SoundFX.playError();
 				throw new Error("¡Cuidado! BIT cayó en una baldosa rota. Usa el sensor para saltar.");
 			}
+			await this.tickPhysics();
 		});
+	}
+
+	performClear() {
+		const ahead = this.getAheadCoordinates();
+		if (this.isOutOfBounds(ahead.x, ahead.y)) {
+			throw new Error("¡Ouch! BIT intentó despejar fuera de los límites del mapa.");
+		}
+		const tile = this.grid[ahead.y][ahead.x];
+		if (tile === 7) {
+			this.grid[ahead.y][ahead.x] = 0;
+			if (window.SoundFX) window.SoundFX.playMunch();
+			this.spawnCircuitParticles(ahead.x, ahead.y);
+		} else if (tile === 9) {
+			this.grid[ahead.y][ahead.x] = 0;
+			this.infotronsCollected += 1;
+			if (window.SoundFX) window.SoundFX.playInfotron();
+			this.spawnCoreParticles(ahead.x, ahead.y);
+			if (this.infotronsRequired > 0 && this.infotronsCollected >= this.infotronsRequired && !this.exitUnlocked) {
+				this.exitUnlocked = true;
+				if (window.SoundFX) window.SoundFX.playExitReady();
+			}
+		} else {
+			throw new Error("¡Nada que despejar! La casilla frente a BIT no contiene una pista ni un infotrón.");
+		}
+		if (window.SoundFX) window.SoundFX.playAction();
+		return new Promise(resolve => setTimeout(resolve, 150)).then(() => this.tickPhysics());
+	}
+
+	performPush() {
+		const ahead = this.getAheadCoordinates();
+		if (this.isOutOfBounds(ahead.x, ahead.y)) {
+			throw new Error("¡Ouch! BIT intentó empujar fuera del mapa.");
+		}
+		const tile = this.grid[ahead.y][ahead.x];
+		if (tile !== 8 && tile !== 13) {
+			throw new Error("¡Nada que empujar! Solo se pueden empujar componentes pesados o discos.");
+		}
+		const dx = ahead.x - this.bot.x;
+		const dy = ahead.y - this.bot.y;
+		const behindX = ahead.x + dx;
+		const behindY = ahead.y + dy;
+		if (this.isOutOfBounds(behindX, behindY) || this.grid[behindY][behindX] !== 0) {
+			throw new Error("¡Espacio bloqueado! No hay espacio libre detrás del objeto para empujarlo.");
+		}
+		this.grid[ahead.y][ahead.x] = 0;
+		this.grid[behindY][behindX] = tile;
+		if (window.SoundFX) window.SoundFX.playStep();
+		return new Promise(resolve => setTimeout(resolve, 180)).then(() => this.tickPhysics());
 	}
 
 	performJump() {
@@ -292,7 +421,133 @@ class GameEngine {
 		this.laserState = !this.laserState;
 		this.laserTimer = this.laserState ? 0 : 45;
 		if (window.SoundFX) window.SoundFX.playTurn();
-		return new Promise(resolve => setTimeout(resolve, 220));
+		return new Promise(resolve => setTimeout(resolve, 220)).then(() => this.tickPhysics());
+	}
+
+	async tickPhysics() {
+		const rows = this.grid.length;
+		const cols = this.grid[0].length;
+		let stateChanged = false;
+
+		for (let r = rows - 2; r >= 0; r--) {
+			for (let c = 0; c < cols; c++) {
+				const tile = this.grid[r][c];
+				if (tile === 8 || tile === 9 || tile === 13) {
+					const below = this.grid[r + 1][c];
+					if (below === 0) {
+						if (this.bot.x === c && this.bot.y === r + 1) {
+							if (window.SoundFX) window.SoundFX.playError();
+							throw new Error("¡Aplastado! Un componente pesado cayó sobre BIT.");
+						}
+						this.grid[r][c] = 0;
+						this.grid[r + 1][c] = tile;
+						stateChanged = true;
+						if (tile === 13 && r + 2 < rows && this.grid[r + 2][c] !== 0) {
+							this.triggerExplosion(c, r + 1);
+						}
+					} else if (below === 8 || below === 9) {
+						if (c > 0 && this.grid[r][c - 1] === 0 && this.grid[r + 1][c - 1] === 0 && !(this.bot.x === c - 1 && this.bot.y === r)) {
+							this.grid[r][c] = 0;
+							this.grid[r][c - 1] = tile;
+							stateChanged = true;
+						} else if (c < cols - 1 && this.grid[r][c + 1] === 0 && this.grid[r + 1][c + 1] === 0 && !(this.bot.x === c + 1 && this.bot.y === r)) {
+							this.grid[r][c] = 0;
+							this.grid[r][c + 1] = tile;
+							stateChanged = true;
+						}
+					} else if (below === 15) {
+						this.grid[r][c] = 0;
+						this.triggerExplosion(c, r + 1);
+						stateChanged = true;
+					} else if (below === 16) {
+						this.grid[r][c] = 0;
+						this.transmuteElectron(c, r + 1);
+						stateChanged = true;
+					}
+				}
+			}
+		}
+
+		if (stateChanged && window.SoundFX) {
+			window.SoundFX.playZonkImpact();
+		}
+		if (this.infotronsRequired > 0 && this.infotronsCollected >= this.infotronsRequired && !this.exitUnlocked) {
+			this.exitUnlocked = true;
+			if (window.SoundFX) window.SoundFX.playExitReady();
+		}
+	}
+
+	triggerExplosion(centerX, centerY) {
+		if (window.SoundFX) window.SoundFX.playExplosion();
+		this.spawnExplosionParticles(centerX, centerY);
+		for (let dy = -1; dy <= 1; dy++) {
+			for (let dx = -1; dx <= 1; dx++) {
+				const tx = centerX + dx;
+				const ty = centerY + dy;
+				if (!this.isOutOfBounds(tx, ty)) {
+					if (this.grid[ty][tx] !== 1 && this.grid[ty][tx] !== 10) {
+						this.grid[ty][tx] = 0;
+					}
+					if (this.bot.x === tx && this.bot.y === ty) {
+						throw new Error("¡Explosión! BIT fue alcanzado por la detonación.");
+					}
+				}
+			}
+		}
+	}
+
+	transmuteElectron(centerX, centerY) {
+		if (window.SoundFX) window.SoundFX.playInfotron();
+		this.spawnCoreParticles(centerX, centerY);
+		for (let dy = -1; dy <= 1; dy++) {
+			for (let dx = -1; dx <= 1; dx++) {
+				const tx = centerX + dx;
+				const ty = centerY + dy;
+				if (!this.isOutOfBounds(tx, ty)) {
+					if (this.grid[ty][tx] !== 1 && this.grid[ty][tx] !== 10) {
+						this.grid[ty][tx] = 9;
+					}
+				}
+			}
+		}
+	}
+
+	spawnCircuitParticles(gridX, gridY) {
+		const px = this.offsetX + (gridX + 0.5) * this.cellSize;
+		const py = this.offsetY + (gridY + 0.5) * this.cellSize;
+		for (let i = 0; i < 16; i++) {
+			const angle = (Math.PI * 2 * i) / 16;
+			const speed = 1.0 + Math.random() * 2.0;
+			this.particles.push({
+				x: px,
+				y: py,
+				vx: Math.cos(angle) * speed,
+				vy: Math.sin(angle) * speed,
+				radius: 1.5 + Math.random() * 2,
+				color: Math.random() > 0.5 ? '#10b981' : '#34d399',
+				alpha: 1,
+				life: 20 + Math.random() * 10
+			});
+		}
+	}
+
+	spawnExplosionParticles(gridX, gridY) {
+		const px = this.offsetX + (gridX + 0.5) * this.cellSize;
+		const py = this.offsetY + (gridY + 0.5) * this.cellSize;
+		for (let i = 0; i < 32; i++) {
+			const angle = Math.random() * Math.PI * 2;
+			const speed = 2.0 + Math.random() * 4.0;
+			this.particles.push({
+				x: px,
+				y: py,
+				vx: Math.cos(angle) * speed,
+				vy: Math.sin(angle) * speed,
+				radius: 2.5 + Math.random() * 3.5,
+				color: Math.random() > 0.5 ? '#f97316' : '#ef4444',
+				alpha: 1,
+				life: 25 + Math.random() * 15
+			});
+		}
 	}
 
 	startAnimation(animData) {
@@ -476,6 +731,143 @@ class GameEngine {
 			this.ctx.strokeStyle = this.laserState ? '#ef4444' : '#10b981';
 			this.ctx.lineWidth = 4;
 			this.ctx.stroke();
+		} else if (type === 7) {
+			this.ctx.fillStyle = '#064e3b';
+			this.ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+			this.ctx.strokeStyle = '#059669';
+			this.ctx.lineWidth = 1;
+			this.ctx.strokeRect(x + 1, y + 1, s - 2, s - 2);
+			this.ctx.strokeStyle = '#34d399';
+			this.ctx.lineWidth = 2;
+			this.ctx.beginPath();
+			this.ctx.moveTo(x + 4, y + s / 2);
+			this.ctx.lineTo(x + s / 2, y + s / 2);
+			this.ctx.lineTo(x + s / 2, y + s - 4);
+			this.ctx.stroke();
+			this.ctx.fillStyle = '#fbbf24';
+			this.ctx.beginPath();
+			this.ctx.arc(x + s / 2, y + s / 2, 3, 0, Math.PI * 2);
+			this.ctx.fill();
+		} else if (type === 8) {
+			this.ctx.fillStyle = '#f8fafc';
+			this.ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+			const cx = x + s / 2;
+			const cy = y + s / 2;
+			const r = s * 0.36;
+			const grad = this.ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+			grad.addColorStop(0, '#cbd5e1');
+			grad.addColorStop(0.7, '#64748b');
+			grad.addColorStop(1, '#334155');
+			this.ctx.fillStyle = grad;
+			this.ctx.beginPath();
+			this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
+			this.ctx.fill();
+			this.ctx.strokeStyle = '#1e293b';
+			this.ctx.lineWidth = 1.5;
+			this.ctx.stroke();
+			this.ctx.fillStyle = '#475569';
+			this.ctx.beginPath();
+			this.ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+			this.ctx.fill();
+		} else if (type === 9) {
+			this.ctx.fillStyle = '#f8fafc';
+			this.ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+			const cx = x + s / 2;
+			const cy = y + s / 2;
+			this.ctx.strokeStyle = '#06b6d4';
+			this.ctx.lineWidth = 1.5;
+			this.ctx.beginPath();
+			this.ctx.ellipse(cx, cy, s * 0.38, s * 0.18, Math.PI / 4, 0, Math.PI * 2);
+			this.ctx.stroke();
+			this.ctx.beginPath();
+			this.ctx.ellipse(cx, cy, s * 0.38, s * 0.18, -Math.PI / 4, 0, Math.PI * 2);
+			this.ctx.stroke();
+			this.ctx.fillStyle = '#0891b2';
+			this.ctx.beginPath();
+			this.ctx.arc(cx, cy, s * 0.18, 0, Math.PI * 2);
+			this.ctx.fill();
+			this.ctx.fillStyle = '#ffffff';
+			this.ctx.beginPath();
+			this.ctx.arc(cx - 2, cy - 2, s * 0.07, 0, Math.PI * 2);
+			this.ctx.fill();
+		} else if (type === 10) {
+			this.ctx.fillStyle = '#0f172a';
+			this.ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+			this.ctx.strokeStyle = this.exitUnlocked ? '#10b981' : '#ef4444';
+			this.ctx.lineWidth = 2.5;
+			this.ctx.strokeRect(x + 3, y + 3, s - 6, s - 6);
+			const cx = x + s / 2;
+			const cy = y + s / 2;
+			if (this.exitUnlocked) {
+				this.ctx.fillStyle = '#10b981';
+				this.ctx.beginPath();
+				this.ctx.arc(cx, cy, s * 0.28, 0, Math.PI * 2);
+				this.ctx.fill();
+				this.ctx.fillStyle = '#ecfdf5';
+				this.ctx.beginPath();
+				this.ctx.arc(cx, cy, s * 0.14, 0, Math.PI * 2);
+				this.ctx.fill();
+			} else {
+				this.ctx.fillStyle = '#ef4444';
+				this.ctx.beginPath();
+				this.ctx.arc(cx, cy, s * 0.22, 0, Math.PI * 2);
+				this.ctx.fill();
+			}
+		} else if (type === 13) {
+			this.ctx.fillStyle = '#f8fafc';
+			this.ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+			const cx = x + s / 2;
+			const cy = y + s / 2;
+			const r = s * 0.34;
+			this.ctx.fillStyle = '#ea580c';
+			this.ctx.beginPath();
+			this.ctx.arc(cx, cy, r, 0, Math.PI * 2);
+			this.ctx.fill();
+			this.ctx.strokeStyle = '#c2410c';
+			this.ctx.lineWidth = 2;
+			this.ctx.stroke();
+			this.ctx.fillStyle = '#fed7aa';
+			this.ctx.beginPath();
+			this.ctx.arc(cx, cy, r * 0.4, 0, Math.PI * 2);
+			this.ctx.fill();
+		} else if (type === 15) {
+			this.ctx.fillStyle = '#f8fafc';
+			this.ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+			const cx = x + s / 2;
+			const cy = y + s / 2;
+			this.ctx.strokeStyle = '#ef4444';
+			this.ctx.lineWidth = 2.5;
+			this.ctx.beginPath();
+			this.ctx.moveTo(cx - 10, cy - 10);
+			this.ctx.lineTo(cx + 10, cy + 10);
+			this.ctx.moveTo(cx + 10, cy - 10);
+			this.ctx.lineTo(cx - 10, cy + 10);
+			this.ctx.stroke();
+			this.ctx.fillStyle = '#7f1d1d';
+			this.ctx.beginPath();
+			this.ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+			this.ctx.fill();
+		} else if (type === 16) {
+			this.ctx.fillStyle = '#f8fafc';
+			this.ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+			const cx = x + s / 2;
+			const cy = y + s / 2;
+			this.ctx.fillStyle = '#06b6d4';
+			this.ctx.beginPath();
+			for (let i = 0; i < 8; i++) {
+				const a = (Math.PI / 4) * i;
+				const rad = (i % 2 === 0) ? s * 0.36 : s * 0.16;
+				const px = cx + Math.cos(a) * rad;
+				const py = cy + Math.sin(a) * rad;
+				if (i === 0) this.ctx.moveTo(px, py);
+				else this.ctx.lineTo(px, py);
+			}
+			this.ctx.closePath();
+			this.ctx.fill();
+			this.ctx.fillStyle = '#ffffff';
+			this.ctx.beginPath();
+			this.ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+			this.ctx.fill();
 		} else {
 			this.ctx.fillStyle = '#ffffff';
 			this.ctx.fillRect(x + 1, y + 1, s - 2, s - 2);

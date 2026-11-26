@@ -181,10 +181,14 @@ class GameEngine3D {
 		this.gateMeshes = [];
 		this.butterflies = [];
 		this.animatedBiomeObjects = [];
+		this.infotronsCollected = 0;
+		this.infotronsRequired = levelData.infotronsRequired || 0;
+		this.exitUnlocked = this.infotronsRequired === 0;
+		this.supaplexMeshes = new Map();
 
 		const mod = (levelData.id || "1.1").split('.')[0];
 		let biomeType = "nave";
-		if (mod === "2") biomeType = "fabrica";
+		if (mod === "2" || mod === "7" || mod === "S") biomeType = "fabrica";
 		else if (mod === "3") biomeType = "bosque";
 		else if (mod === "4") biomeType = "oceano";
 		else if (mod === "5") biomeType = "glaciar";
@@ -333,6 +337,20 @@ class GameEngine3D {
 						this.spawnGate(posX, posZ, c, r);
 					} else if (tileType === 6) {
 						this.spawnLaser(posX, posZ, c, r);
+					} else if (tileType === 7) {
+						this.spawnCircuitTile(posX, posZ, c, r);
+					} else if (tileType === 8) {
+						this.spawnZonk(posX, posZ, c, r);
+					} else if (tileType === 9) {
+						this.spawnInfotron(posX, posZ, c, r);
+					} else if (tileType === 10) {
+						this.spawnExit(posX, posZ, c, r);
+					} else if (tileType === 13) {
+						this.spawnDisk(posX, posZ, c, r);
+					} else if (tileType === 15) {
+						this.spawnScissors(posX, posZ, c, r);
+					} else if (tileType === 16) {
+						this.spawnElectron(posX, posZ, c, r);
 					}
 				}
 			}
@@ -557,6 +575,162 @@ class GameEngine3D {
 
 		this.itemsGroup.add(group);
 		this.laserMeshes.push({ beam: beamMesh, light: light, x: c, y: r });
+	}
+
+	spawnCircuitTile(wx, wz, c, r) {
+		const group = new THREE.Group();
+		group.position.set(wx, 0.01, wz);
+		const geo = new THREE.BoxGeometry(0.9, 0.04, 0.9);
+		const mat = new THREE.MeshStandardMaterial({
+			color: 0x064e3b,
+			roughness: 0.3,
+			metalness: 0.4
+		});
+		const mesh = new THREE.Mesh(geo, mat);
+		mesh.receiveShadow = true;
+		group.add(mesh);
+		this.itemsGroup.add(group);
+		this.supaplexMeshes.set(`${c},${r}`, group);
+	}
+
+	spawnZonk(wx, wz, c, r) {
+		const group = new THREE.Group();
+		group.position.set(wx, 0.36, wz);
+		const geo = new THREE.DodecahedronGeometry(0.32);
+		const mat = new THREE.MeshStandardMaterial({
+			color: 0x94a3b8,
+			roughness: 0.25,
+			metalness: 0.85
+		});
+		const mesh = new THREE.Mesh(geo, mat);
+		mesh.castShadow = true;
+		mesh.receiveShadow = true;
+		group.add(mesh);
+		this.itemsGroup.add(group);
+		this.supaplexMeshes.set(`${c},${r}`, group);
+	}
+
+	spawnInfotron(wx, wz, c, r) {
+		const group = new THREE.Group();
+		group.position.set(wx, 0.36, wz);
+		const crystalGeo = new THREE.OctahedronGeometry(0.24, 0);
+		const crystalMat = new THREE.MeshStandardMaterial({
+			color: 0x06b6d4,
+			emissive: 0x0891b2,
+			emissiveIntensity: 0.5,
+			roughness: 0.1,
+			metalness: 0.3
+		});
+		const crystalMesh = new THREE.Mesh(crystalGeo, crystalMat);
+		crystalMesh.castShadow = true;
+		group.add(crystalMesh);
+
+		const ringGeo = new THREE.TorusGeometry(0.32, 0.025, 12, 24);
+		const ringMat = new THREE.MeshStandardMaterial({
+			color: 0x38bdf8,
+			emissive: 0x0284c7,
+			emissiveIntensity: 0.3
+		});
+		const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+		ringMesh.rotation.x = Math.PI / 4;
+		group.add(ringMesh);
+
+		this.itemsGroup.add(group);
+		this.supaplexMeshes.set(`${c},${r}`, group);
+	}
+
+	spawnExit(wx, wz, c, r) {
+		const group = new THREE.Group();
+		group.position.set(wx, 0.02, wz);
+		const padGeo = new THREE.BoxGeometry(0.86, 0.05, 0.86);
+		const padMat = new THREE.MeshStandardMaterial({
+			color: this.exitUnlocked ? 0x10b981 : 0xef4444,
+			emissive: this.exitUnlocked ? 0x059669 : 0x991b1b,
+			emissiveIntensity: 0.6,
+			roughness: 0.2
+		});
+		const padMesh = new THREE.Mesh(padGeo, padMat);
+		group.add(padMesh);
+		this.itemsGroup.add(group);
+		this.supaplexMeshes.set(`${c},${r}`, group);
+	}
+
+	spawnDisk(wx, wz, c, r) {
+		const group = new THREE.Group();
+		group.position.set(wx, 0.2, wz);
+		const geo = new THREE.CylinderGeometry(0.32, 0.32, 0.35, 16);
+		const mat = new THREE.MeshStandardMaterial({
+			color: 0xea580c,
+			emissive: 0xc2410c,
+			emissiveIntensity: 0.4,
+			roughness: 0.3,
+			metalness: 0.5
+		});
+		const mesh = new THREE.Mesh(geo, mat);
+		mesh.castShadow = true;
+		group.add(mesh);
+		this.itemsGroup.add(group);
+		this.supaplexMeshes.set(`${c},${r}`, group);
+	}
+
+	spawnScissors(wx, wz, c, r) {
+		const group = new THREE.Group();
+		group.position.set(wx, 0.3, wz);
+		const geo = new THREE.BoxGeometry(0.48, 0.1, 0.1);
+		const mat = new THREE.MeshStandardMaterial({
+			color: 0xef4444,
+			roughness: 0.2,
+			metalness: 0.6
+		});
+		const bladeA = new THREE.Mesh(geo, mat);
+		bladeA.rotation.y = Math.PI / 4;
+		const bladeB = new THREE.Mesh(geo, mat);
+		bladeB.rotation.y = -Math.PI / 4;
+		group.add(bladeA, bladeB);
+		this.itemsGroup.add(group);
+		this.supaplexMeshes.set(`${c},${r}`, group);
+	}
+
+	spawnElectron(wx, wz, c, r) {
+		const group = new THREE.Group();
+		group.position.set(wx, 0.32, wz);
+		const geo = new THREE.OctahedronGeometry(0.26, 0);
+		const mat = new THREE.MeshStandardMaterial({
+			color: 0x38bdf8,
+			emissive: 0x0284c7,
+			emissiveIntensity: 0.8,
+			wireframe: true
+		});
+		const mesh = new THREE.Mesh(geo, mat);
+		group.add(mesh);
+		this.itemsGroup.add(group);
+		this.supaplexMeshes.set(`${c},${r}`, group);
+	}
+
+	refreshSupaplexMeshes() {
+		if (!this.supaplexMeshes) return;
+		for (const [, mesh] of this.supaplexMeshes.entries()) {
+			this.itemsGroup.remove(mesh);
+		}
+		this.supaplexMeshes.clear();
+		const rows = this.grid.length;
+		const cols = this.grid[0].length;
+		const originX = -(cols - 1) / 2;
+		const originZ = -(rows - 1) / 2;
+		for (let r = 0; r < rows; r++) {
+			for (let c = 0; c < cols; c++) {
+				const tile = this.grid[r][c];
+				const posX = originX + c;
+				const posZ = originZ + r;
+				if (tile === 7) this.spawnCircuitTile(posX, posZ, c, r);
+				else if (tile === 8) this.spawnZonk(posX, posZ, c, r);
+				else if (tile === 9) this.spawnInfotron(posX, posZ, c, r);
+				else if (tile === 10) this.spawnExit(posX, posZ, c, r);
+				else if (tile === 13) this.spawnDisk(posX, posZ, c, r);
+				else if (tile === 15) this.spawnScissors(posX, posZ, c, r);
+				else if (tile === 16) this.spawnElectron(posX, posZ, c, r);
+			}
+		}
 	}
 
 	getBiomeConfig(biomeType) {
@@ -2211,11 +2385,60 @@ class GameEngine3D {
 		return this.grid[target.y][target.x] === 6 && this.laserState;
 	}
 
+	checkDangerAbove() {
+		if (this.bot.y <= 0) return false;
+		const directlyAbove = this.grid[this.bot.y - 1][this.bot.x];
+		if (directlyAbove === 8 || directlyAbove === 9 || directlyAbove === 13) return true;
+		if (this.bot.x > 0) {
+			const leftAbove = this.grid[this.bot.y - 1][this.bot.x - 1];
+			if ((leftAbove === 8 || leftAbove === 9) && this.grid[this.bot.y][this.bot.x - 1] !== 0) return true;
+		}
+		if (this.bot.x < this.grid[0].length - 1) {
+			const rightAbove = this.grid[this.bot.y - 1][this.bot.x + 1];
+			if ((rightAbove === 8 || rightAbove === 9) && this.grid[this.bot.y][this.bot.x + 1] !== 0) return true;
+		}
+		return false;
+	}
+
+	checkAheadType(expectedType) {
+		const ahead = this.getAheadCoordinates();
+		if (this.isOutOfBounds(ahead.x, ahead.y)) {
+			return expectedType === 'muro';
+		}
+		const tile = this.grid[ahead.y][ahead.x];
+		const typeNames = {
+			0: 'vacio',
+			1: 'muro',
+			7: 'pista',
+			8: 'zonk',
+			9: 'infotron',
+			10: 'salida',
+			13: 'disco',
+			15: 'enemigo',
+			16: 'enemigo'
+		};
+		const currentType = typeNames[tile] || 'otro';
+		return currentType === expectedType;
+	}
+
 	isAtGoal() {
+		if (this.level && this.level.infotronsRequired > 0) {
+			const onExit = this.grid[this.bot.y][this.bot.x] === 10 || (this.level.exit && this.bot.x === this.level.exit.x && this.bot.y === this.level.exit.y);
+			return onExit && (this.infotronsCollected >= this.infotronsRequired);
+		}
+		if (this.grid[this.bot.y][this.bot.x] === 10) {
+			return true;
+		}
+		if (this.cores.length > 0 && this.areAllCoresActive()) {
+			return true;
+		}
 		return this.cores.some(c => c.x === this.bot.x && c.y === this.bot.y);
 	}
 
 	areAllCoresActive() {
+		if (this.level && this.level.infotronsRequired > 0) {
+			return this.infotronsCollected >= this.infotronsRequired;
+		}
 		if (this.cores.length === 0) return true;
 		return this.cores.every(c => c.active);
 	}
@@ -2241,6 +2464,10 @@ class GameEngine3D {
 				return this.performAddMemory(arg || 1);
 			case 'esperar':
 				return this.performWait();
+			case 'despejar':
+				return this.performClear();
+			case 'empujar':
+				return this.performPush();
 			default:
 				return Promise.resolve();
 		}
@@ -2255,6 +2482,15 @@ class GameEngine3D {
 		if (tile === 1) {
 			throw new Error("¡Ouch! BIT intentó avanzar, pero había un muro frente a él.");
 		}
+		if (tile === 8) {
+			throw new Error("¡Bloqueado! Un componente pesado bloquea el paso. Usa empujar si hay espacio libre detrás.");
+		}
+		if (tile === 13) {
+			throw new Error("¡Peligro! Un disco de impacto bloquea el paso.");
+		}
+		if (tile === 15 || tile === 16) {
+			throw new Error("¡Alerta! BIT colisionó contra una entidad enemiga.");
+		}
 		if (tile === 6 && this.laserState) {
 			throw new Error("¡Alerta! BIT intentó cruzar una barrera láser activa.");
 		}
@@ -2268,7 +2504,24 @@ class GameEngine3D {
 		const fromY = this.bot.y;
 		this.bot.x = ahead.x;
 		this.bot.y = ahead.y;
-		if (window.SoundFX) window.SoundFX.playStep();
+		if (tile === 7) {
+			this.grid[ahead.y][ahead.x] = 0;
+			if (window.SoundFX) window.SoundFX.playMunch();
+			this.spawnCoreParticles3D(ahead.x - (this.grid[0].length - 1) / 2, ahead.y - (this.grid.length - 1) / 2);
+			this.refreshSupaplexMeshes();
+		} else if (tile === 9) {
+			this.grid[ahead.y][ahead.x] = 0;
+			this.infotronsCollected += 1;
+			if (window.SoundFX) window.SoundFX.playInfotron();
+			this.spawnCoreParticles3D(ahead.x - (this.grid[0].length - 1) / 2, ahead.y - (this.grid.length - 1) / 2);
+			if (this.infotronsRequired > 0 && this.infotronsCollected >= this.infotronsRequired && !this.exitUnlocked) {
+				this.exitUnlocked = true;
+				if (window.SoundFX) window.SoundFX.playExitReady();
+			}
+			this.refreshSupaplexMeshes();
+		} else {
+			if (window.SoundFX) window.SoundFX.playStep();
+		}
 
 		return this.startAnimation({
 			fromX: fromX,
@@ -2278,12 +2531,64 @@ class GameEngine3D {
 			fromAngle: this.bot.renderAngle,
 			toAngle: this.getAngleFromDir(this.bot.dir),
 			jump: false
-		}).then(() => {
+		}).then(async () => {
 			if (tile === 3) {
 				if (window.SoundFX) window.SoundFX.playError();
 				throw new Error("¡Cuidado! BIT cayó en una baldosa rota. Usa el sensor para saltar.");
 			}
+			await this.tickPhysics();
 		});
+	}
+
+	performClear() {
+		const ahead = this.getAheadCoordinates();
+		if (this.isOutOfBounds(ahead.x, ahead.y)) {
+			throw new Error("¡Ouch! BIT intentó despejar fuera de los límites del mapa.");
+		}
+		const tile = this.grid[ahead.y][ahead.x];
+		if (tile === 7) {
+			this.grid[ahead.y][ahead.x] = 0;
+			if (window.SoundFX) window.SoundFX.playMunch();
+			this.spawnCoreParticles3D(ahead.x - (this.grid[0].length - 1) / 2, ahead.y - (this.grid.length - 1) / 2);
+			this.refreshSupaplexMeshes();
+		} else if (tile === 9) {
+			this.grid[ahead.y][ahead.x] = 0;
+			this.infotronsCollected += 1;
+			if (window.SoundFX) window.SoundFX.playInfotron();
+			this.spawnCoreParticles3D(ahead.x - (this.grid[0].length - 1) / 2, ahead.y - (this.grid.length - 1) / 2);
+			if (this.infotronsRequired > 0 && this.infotronsCollected >= this.infotronsRequired && !this.exitUnlocked) {
+				this.exitUnlocked = true;
+				if (window.SoundFX) window.SoundFX.playExitReady();
+			}
+			this.refreshSupaplexMeshes();
+		} else {
+			throw new Error("¡Nada que despejar! La casilla frente a BIT no contiene una pista ni un infotrón.");
+		}
+		if (window.SoundFX) window.SoundFX.playAction();
+		return new Promise(resolve => setTimeout(resolve, 150)).then(() => this.tickPhysics());
+	}
+
+	performPush() {
+		const ahead = this.getAheadCoordinates();
+		if (this.isOutOfBounds(ahead.x, ahead.y)) {
+			throw new Error("¡Ouch! BIT intentó empujar fuera del mapa.");
+		}
+		const tile = this.grid[ahead.y][ahead.x];
+		if (tile !== 8 && tile !== 13) {
+			throw new Error("¡Nada que empujar! Solo se pueden empujar componentes pesados o discos.");
+		}
+		const dx = ahead.x - this.bot.x;
+		const dy = ahead.y - this.bot.y;
+		const behindX = ahead.x + dx;
+		const behindY = ahead.y + dy;
+		if (this.isOutOfBounds(behindX, behindY) || this.grid[behindY][behindX] !== 0) {
+			throw new Error("¡Espacio bloqueado! No hay espacio libre detrás del objeto para empujarlo.");
+		}
+		this.grid[ahead.y][ahead.x] = 0;
+		this.grid[behindY][behindX] = tile;
+		this.refreshSupaplexMeshes();
+		if (window.SoundFX) window.SoundFX.playStep();
+		return new Promise(resolve => setTimeout(resolve, 180)).then(() => this.tickPhysics());
 	}
 
 	performJump() {
@@ -2402,7 +2707,99 @@ class GameEngine3D {
 		this.laserTimer = this.laserState ? 0 : 45;
 		this.updateLaserVisuals();
 		if (window.SoundFX) window.SoundFX.playTurn();
-		return new Promise(r => setTimeout(r, 250));
+		return new Promise(r => setTimeout(r, 250)).then(() => this.tickPhysics());
+	}
+
+	async tickPhysics() {
+		const rows = this.grid.length;
+		const cols = this.grid[0].length;
+		let stateChanged = false;
+
+		for (let r = rows - 2; r >= 0; r--) {
+			for (let c = 0; c < cols; c++) {
+				const tile = this.grid[r][c];
+				if (tile === 8 || tile === 9 || tile === 13) {
+					const below = this.grid[r + 1][c];
+					if (below === 0) {
+						if (this.bot.x === c && this.bot.y === r + 1) {
+							if (window.SoundFX) window.SoundFX.playError();
+							throw new Error("¡Aplastado! Un componente pesado cayó sobre BIT.");
+						}
+						this.grid[r][c] = 0;
+						this.grid[r + 1][c] = tile;
+						stateChanged = true;
+						if (tile === 13 && r + 2 < rows && this.grid[r + 2][c] !== 0) {
+							this.triggerExplosion(c, r + 1);
+						}
+					} else if (below === 8 || below === 9) {
+						if (c > 0 && this.grid[r][c - 1] === 0 && this.grid[r + 1][c - 1] === 0 && !(this.bot.x === c - 1 && this.bot.y === r)) {
+							this.grid[r][c] = 0;
+							this.grid[r][c - 1] = tile;
+							stateChanged = true;
+						} else if (c < cols - 1 && this.grid[r][c + 1] === 0 && this.grid[r + 1][c + 1] === 0 && !(this.bot.x === c + 1 && this.bot.y === r)) {
+							this.grid[r][c] = 0;
+							this.grid[r][c + 1] = tile;
+							stateChanged = true;
+						}
+					} else if (below === 15) {
+						this.grid[r][c] = 0;
+						this.triggerExplosion(c, r + 1);
+						stateChanged = true;
+					} else if (below === 16) {
+						this.grid[r][c] = 0;
+						this.transmuteElectron(c, r + 1);
+						stateChanged = true;
+					}
+				}
+			}
+		}
+
+		if (stateChanged) {
+			this.refreshSupaplexMeshes();
+			if (window.SoundFX) window.SoundFX.playZonkImpact();
+		}
+		if (this.infotronsRequired > 0 && this.infotronsCollected >= this.infotronsRequired && !this.exitUnlocked) {
+			this.exitUnlocked = true;
+			this.refreshSupaplexMeshes();
+			if (window.SoundFX) window.SoundFX.playExitReady();
+		}
+	}
+
+	triggerExplosion(centerX, centerY) {
+		if (window.SoundFX) window.SoundFX.playExplosion();
+		this.spawnCoreParticles3D(centerX - (this.grid[0].length - 1) / 2, centerY - (this.grid.length - 1) / 2);
+		for (let dy = -1; dy <= 1; dy++) {
+			for (let dx = -1; dx <= 1; dx++) {
+				const tx = centerX + dx;
+				const ty = centerY + dy;
+				if (!this.isOutOfBounds(tx, ty)) {
+					if (this.grid[ty][tx] !== 1 && this.grid[ty][tx] !== 10) {
+						this.grid[ty][tx] = 0;
+					}
+					if (this.bot.x === tx && this.bot.y === ty) {
+						throw new Error("¡Explosión! BIT fue alcanzado por la detonación.");
+					}
+				}
+			}
+		}
+		this.refreshSupaplexMeshes();
+	}
+
+	transmuteElectron(centerX, centerY) {
+		if (window.SoundFX) window.SoundFX.playInfotron();
+		this.spawnCoreParticles3D(centerX - (this.grid[0].length - 1) / 2, centerY - (this.grid.length - 1) / 2);
+		for (let dy = -1; dy <= 1; dy++) {
+			for (let dx = -1; dx <= 1; dx++) {
+				const tx = centerX + dx;
+				const ty = centerY + dy;
+				if (!this.isOutOfBounds(tx, ty)) {
+					if (this.grid[ty][tx] !== 1 && this.grid[ty][tx] !== 10) {
+						this.grid[ty][tx] = 9;
+					}
+				}
+			}
+		}
+		this.refreshSupaplexMeshes();
 	}
 
 	startAnimation(anim) {
