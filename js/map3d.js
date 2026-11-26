@@ -108,7 +108,7 @@ const ProgressMap3D = {
 		? window.matchMedia('(prefers-reduced-motion: reduce)').matches
 		: false,
 	geo: null,
-	atmos: [[124, 196, 255], [255, 138, 61], [143, 214, 255], [95, 224, 255], [191, 243, 255], [255, 126, 155]],
+	atmos: [[124, 196, 255], [255, 138, 61], [143, 214, 255], [95, 224, 255], [191, 243, 255], [255, 126, 155], [52, 211, 153]],
 	LIGHT: (() => { const l = [-0.52, 0.46, 0.72]; const m = Math.hypot(l[0], l[1], l[2]); return [l[0] / m, l[1] / m, l[2] / m]; })(),
 	TW: 384,
 	TH: 192,
@@ -119,7 +119,8 @@ const ProgressMap3D = {
 		{ id: 3, name: "Condicionales", title: "Bosque Esmeralda", subtitle: "Selva Viva", color: "#22c55e", darkColor: "#15803d", lightColor: "#f0fdf4", bgGradient: "rgba(34, 197, 94, 0.15)", moonColor: "#7cc45f", levels: [8, 9, 10, 11], planetType: "bosque", orbitTilt: 0.18, speed: 1.1 },
 		{ id: 4, name: "Variables", title: "Abismo Coral", subtitle: "Océano Profundo", color: "#14b8a6", darkColor: "#0f766e", lightColor: "#f0fdfa", bgGradient: "rgba(20, 184, 166, 0.15)", moonColor: "#3cc9c0", levels: [12, 13, 14, 15], planetType: "oceano", orbitTilt: -0.28, speed: 0.95 },
 		{ id: 5, name: "Funciones", title: "Glaciar Aurora", subtitle: "Estación Polar", color: "#a78bfa", darkColor: "#6d28d9", lightColor: "#f5f3ff", bgGradient: "rgba(167, 139, 250, 0.15)", moonColor: "#d4e8ff", levels: [16, 17, 18, 19], planetType: "glaciar", orbitTilt: 0.22, speed: 1.05 },
-		{ id: 6, name: "Matrices", title: "Nexo Matricial", subtitle: "Estación de Datos", color: "#fb7185", darkColor: "#be355d", lightColor: "#fff1f2", bgGradient: "rgba(251, 113, 133, 0.16)", moonColor: "#d789a2", levels: [20, 21, 22, 23], planetType: "matriz", orbitTilt: -0.24, speed: 1 }
+		{ id: 6, name: "Matrices", title: "Nexo Matricial", subtitle: "Estación de Datos", color: "#fb7185", darkColor: "#be355d", lightColor: "#fff1f2", bgGradient: "rgba(251, 113, 133, 0.16)", moonColor: "#d789a2", levels: [20, 21, 22, 23], planetType: "matriz", orbitTilt: -0.24, speed: 1 },
+		{ id: 7, name: "Microprocesador", title: "Microprocesador Profundo", subtitle: "Circuito Supaplex", color: "#10b981", darkColor: "#047857", lightColor: "#ecfdf5", bgGradient: "rgba(16, 185, 129, 0.16)", moonColor: "#34d399", levels: [24, 25, 26, 27, 28], planetType: "fabrica", orbitTilt: 0.28, speed: 1.0 }
 	],
 
 	/* ---------- utilidades de color ---------- */
@@ -996,7 +997,7 @@ const ProgressMap3D = {
 		const tex = p.tex;
 		const data = surf.img.data;
 		const TW = this.TW;
-		const atm = this.atmos[p.index];
+		const atm = (this.atmos && this.atmos[p.index]) || [52, 211, 153];
 		const rotS = (t * 0.00005 * p.biome.speed) + p.rotOffset;
 		const rotC = rotS * 1.25 + 0.3;
 		const TAU = Math.PI * 2;
@@ -1097,7 +1098,7 @@ const ProgressMap3D = {
 			const p = this.planets[b];
 			const ctx = this.ctx;
 			const biome = p.biome;
-			const atm = this.atmos[b];
+			const atm = (this.atmos && this.atmos[b]) || [52, 211, 153];
 			const visible = this.isPlanetVisible(p);
 
 			// Halo atmosférico

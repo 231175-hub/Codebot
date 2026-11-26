@@ -101,9 +101,9 @@ const LEVELS = [
 		start: { x: 1, y: 1, dir: 1 },
 		grid: [
 			[1, 1, 1, 1, 1, 1, 1, 1],
-			[1, 0, 0, 3, 0, 0, 1, 1],
-			[1, 1, 1, 1, 1, 0, 1, 1],
-			[1, 1, 1, 1, 1, 3, 1, 1],
+			[1, 0, 0, 3, 0, 0, 0, 1],
+			[1, 1, 1, 1, 0, 0, 1, 1],
+			[1, 1, 1, 1, 3, 3, 1, 1],
 			[1, 1, 1, 1, 1, 0, 1, 1],
 			[1, 1, 1, 1, 1, 2, 1, 1],
 			[1, 1, 1, 1, 1, 1, 1, 1]
@@ -424,5 +424,97 @@ const LEVELS = [
 			source: [[2, 8, 4], [7, 1, 5]],
 			target: [[2, 7], [8, 1], [4, 5]]
 		}
+	},
+	{
+		id: "7.1",
+		module: "Microprocesador",
+		title: "Primer bocado al circuito",
+		instruction: "Despeja las pistas de circuito, recolecta 3 infotrones cuánticos y entra en la terminal de salida.",
+		hint: "Avanza sobre las pistas verdes para consumirlas y recolectar los 3 cristales de infotrón. La salida se abrirá al cumplir la cuota.",
+		maxBlocksFor3Stars: 6,
+		infotronsRequired: 3,
+		availableBlocks: ["avanzar", "girar_izq", "girar_der", "despejar_frente", "repetir"],
+		start: { x: 1, y: 1, dir: 1 },
+		grid: [
+			[1, 1, 1, 1, 1, 1, 1, 1],
+			[1, 0, 7, 9, 7, 9, 7, 1],
+			[1, 1, 7, 1, 7, 1, 9, 1],
+			[1, 1, 3, 1, 3, 1, 10, 1],
+			[1, 1, 1, 1, 1, 1, 1, 1]
+		]
+	},
+	{
+		id: "7.2",
+		module: "Microprocesador",
+		title: "Alerta de gravedad",
+		instruction: "Evita que el componente pesado caiga sobre BIT usando despejar frente y esperar antes de avanzar.",
+		hint: "Avanza un paso, despeja la pista frontal para que el componente caiga en la fosa y espera un ciclo antes de cruzar.",
+		maxBlocksFor3Stars: 7,
+		infotronsRequired: 2,
+		availableBlocks: ["avanzar", "despejar_frente", "esperar", "si_peligro_arriba"],
+		start: { x: 1, y: 2, dir: 1 },
+		grid: [
+			[1, 1, 1, 1, 1, 1, 1, 1],
+			[1, 1, 1, 8, 1, 1, 1, 1],
+			[1, 0, 0, 7, 9, 9, 10, 1],
+			[1, 1, 1, 0, 1, 1, 1, 1],
+			[1, 1, 1, 1, 1, 1, 1, 1]
+		]
+	},
+	{
+		id: "7.3",
+		module: "Microprocesador",
+		title: "Desprendimiento en cascada",
+		instruction: "Aprovecha el deslizamiento oblicuo de los componentes pesados para abrir camino hacia los infotrones.",
+		hint: "Despeja el soporte lateral para que la pila de componentes ruede hacia el vacío liberando la ruta.",
+		maxBlocksFor3Stars: 8,
+		infotronsRequired: 3,
+		availableBlocks: ["avanzar", "girar_izq", "girar_der", "despejar_frente", "esperar"],
+		start: { x: 1, y: 3, dir: 1 },
+		grid: [
+			[1, 1, 1, 1, 1, 1, 1, 1],
+			[1, 1, 1, 8, 1, 1, 1, 1],
+			[1, 1, 0, 8, 9, 9, 1, 1],
+			[1, 0, 7, 1, 7, 9, 10, 1],
+			[1, 1, 7, 3, 1, 1, 1, 1],
+			[1, 1, 1, 1, 1, 1, 1, 1]
+		]
+	},
+	{
+		id: "7.4",
+		module: "Microprocesador",
+		title: "El empuje estratégico",
+		instruction: "Empuja el componente pesado para despejar el corredor y alcanzar la terminal de salida.",
+		hint: "Alinea a BIT frente al bloque pesado y usa empujar adelante cuando la casilla posterior esté vacía.",
+		maxBlocksFor3Stars: 8,
+		infotronsRequired: 2,
+		availableBlocks: ["avanzar", "girar_izq", "girar_der", "empujar_frente", "si_objeto_frente"],
+		start: { x: 1, y: 2, dir: 1 },
+		grid: [
+			[1, 1, 1, 1, 1, 1, 1, 1, 1],
+			[1, 0, 7, 7, 3, 1, 1, 1, 1],
+			[1, 0, 0, 8, 0, 9, 7, 9, 1],
+			[1, 1, 1, 1, 1, 1, 1, 10, 1],
+			[1, 1, 1, 1, 1, 1, 1, 1, 1]
+		]
+	},
+	{
+		id: "7.5",
+		module: "Microprocesador",
+		title: "Fusión cuántica del electrón",
+		instruction: "Haz caer un componente pesado sobre el electrón para transmutarlo en una fuente de 9 infotrones.",
+		hint: "Despeja la pista superior para que el bloque aplaste al electrón en el momento oportuno.",
+		maxBlocksFor3Stars: 10,
+		infotronsRequired: 9,
+		availableBlocks: ["avanzar", "girar_izq", "girar_der", "despejar_frente", "esperar", "repetir"],
+		start: { x: 1, y: 1, dir: 1 },
+		grid: [
+			[1, 1, 1, 1, 1, 1, 1, 1],
+			[1, 0, 7, 7, 1, 1, 1, 1],
+			[1, 1, 1, 8, 1, 1, 1, 1],
+			[1, 1, 1, 7, 1, 1, 1, 1],
+			[1, 0, 0, 16, 0, 0, 10, 1],
+			[1, 1, 1, 1, 1, 1, 1, 1]
+		]
 	}
 ];

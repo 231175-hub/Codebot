@@ -172,6 +172,58 @@ const BlocksManager = {
 			}
 		};
 
+		Blockly.Blocks['despejar_frente'] = {
+			init: function() {
+				this.appendDummyInput().appendField(BlocksManager.createUniformLabel("Despejar frente"));
+				this.setPreviousStatement(true, null);
+				this.setNextStatement(true, null);
+				this.setColour('#2563eb');
+				this.setTooltip("Limpia la pista o recolecta el infotrón ubicado frente a BIT sin desplazarse.");
+			}
+		};
+
+		Blockly.Blocks['empujar_frente'] = {
+			init: function() {
+				this.appendDummyInput().appendField(BlocksManager.createUniformLabel("Empujar adelante"));
+				this.setPreviousStatement(true, null);
+				this.setNextStatement(true, null);
+				this.setColour('#2563eb');
+				this.setTooltip("Empuja un componente pesado o disco frente a BIT si hay espacio libre detrás.");
+			}
+		};
+
+		Blockly.Blocks['si_peligro_arriba'] = {
+			init: function() {
+				this.appendDummyInput().appendField(BlocksManager.createUniformLabel("Si hay peligro arriba"));
+				this.appendStatementInput("DO").appendField("hacer");
+				this.appendStatementInput("ELSE").appendField("si no");
+				this.setPreviousStatement(true, null);
+				this.setNextStatement(true, null);
+				this.setColour('#7c3aed');
+				this.setTooltip("Comprueba si un componente pesado o infotrón está a punto de caer sobre BIT.");
+			}
+		};
+
+		Blockly.Blocks['si_objeto_frente'] = {
+			init: function() {
+				this.appendDummyInput()
+					.appendField("Si objeto al frente es")
+					.appendField(new Blockly.FieldDropdown([
+						["Pista", "pista"],
+						["Zonk", "zonk"],
+						["Infotrón", "infotron"],
+						["Vacío", "vacio"],
+						["Muro", "muro"]
+					]), "TYPE");
+				this.appendStatementInput("DO").appendField("hacer");
+				this.appendStatementInput("ELSE").appendField("si no");
+				this.setPreviousStatement(true, null);
+				this.setNextStatement(true, null);
+				this.setColour('#7c3aed');
+				this.setTooltip("Evalúa el tipo de elemento presente en la casilla frente a BIT.");
+			}
+		};
+
 		Blockly.Blocks['repetir'] = {
 			init: function() {
 				this.appendDummyInput()
@@ -357,6 +409,25 @@ const BlocksManager = {
 			case 'esperar':
 				code = `if (shouldAbort()) return;\nawait engine.step('esperar', '${id}');\n`;
 				break;
+			case 'despejar_frente':
+				code = `if (shouldAbort()) return;\nawait engine.step('despejar', '${id}');\n`;
+				break;
+			case 'empujar_frente':
+				code = `if (shouldAbort()) return;\nawait engine.step('empujar', '${id}');\n`;
+				break;
+			case 'si_peligro_arriba': {
+				const branchDo = this.blockToExecutable(block.getInputTargetBlock('DO'));
+				const branchElse = this.blockToExecutable(block.getInputTargetBlock('ELSE'));
+				code = `if (engine.checkDangerAbove()) {\n${branchDo}} else {\n${branchElse}}\n`;
+				break;
+			}
+			case 'si_objeto_frente': {
+				const targetType = block.getFieldValue('TYPE') || 'pista';
+				const branchDo = this.blockToExecutable(block.getInputTargetBlock('DO'));
+				const branchElse = this.blockToExecutable(block.getInputTargetBlock('ELSE'));
+				code = `if (engine.checkAheadType('${targetType}')) {\n${branchDo}} else {\n${branchElse}}\n`;
+				break;
+			}
 			case 'recoger_memoria':
 				code = `if (shouldAbort()) return;\nawait engine.step('recoger', '${id}');\n`;
 				break;
@@ -454,6 +525,25 @@ const BlocksManager = {
 			case 'esperar':
 				line = `${indent}esperar();`;
 				break;
+			case 'despejar_frente':
+				line = `${indent}despejarFrente();`;
+				break;
+			case 'empujar_frente':
+				line = `${indent}empujarAdelante();`;
+				break;
+			case 'si_peligro_arriba': {
+				const branchDo = this.blockToCleanCode(block.getInputTargetBlock('DO'), indentLevel + 1);
+				const branchElse = this.blockToCleanCode(block.getInputTargetBlock('ELSE'), indentLevel + 1);
+				line = `${indent}if (hayPeligroArriba()) {\n${branchDo}\n${indent}} else {\n${branchElse}\n${indent}}`;
+				break;
+			}
+			case 'si_objeto_frente': {
+				const type = block.getFieldValue('TYPE') || 'pista';
+				const branchDo = this.blockToCleanCode(block.getInputTargetBlock('DO'), indentLevel + 1);
+				const branchElse = this.blockToCleanCode(block.getInputTargetBlock('ELSE'), indentLevel + 1);
+				line = `${indent}if (objetoAlFrenteEs('${type}')) {\n${branchDo}\n${indent}} else {\n${branchElse}\n${indent}}`;
+				break;
+			}
 			case 'recoger_memoria':
 				line = `${indent}memoria = leerBateria();`;
 				break;
