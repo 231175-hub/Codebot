@@ -1,0 +1,129 @@
+#matrix-panel[hidden] {
+	display: none;
+}
+
+#matrix-panel {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	padding: clamp(14px, 3vw, 30px);
+	overflow: auto;
+	background:
+		radial-gradient(ellipse at 54% 45%, rgba(86, 30, 75, 0.36), transparent 75%),
+		repeating-linear-gradient(90deg, rgba(131, 110, 173, 0.08) 0 1px, transparent 1px 28px),
+		repeating-linear-gradient(rgba(131, 110, 173, 0.08) 0 1px, transparent 1px 28px),
+		#080c1a;
+}
+
+.matrix-boards {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	align-items: start;
+	gap: clamp(9px, 1.4vw, 18px);
+	margin-block-start: auto;
+}
+
+.matrix-board-card {
+	flex: 0 1 auto;
+	max-width: 100%;
+	padding: 0 7px 7px;
+	border: 1px solid rgba(155, 153, 186, 0.24);
+	border-radius: var(--radius-lg);
+	background: rgba(12, 16, 32, 0.96);
+	box-shadow: var(--shadow-md);
+}
+
+.matrix-board {
+	--matrix-tint: #b9c6e4;
+	width: 100%;
+	border: none;
+	border-collapse: separate;
+	border-spacing: 4px;
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	text-align: center;
+}
+
+.matrix-board--work {
+	--matrix-tint: #fba5ca;
+}
+
+.matrix-board--target {
+	--matrix-tint: #80e8ca;
+}
+
+.matrix-board caption {
+	padding: 11px 4px 4px;
+	color: var(--matrix-tint);
+	font-family: var(--font-sans);
+	font-size: 0.73rem;
+	font-weight: 750;
+}
+
+.matrix-dimensions {
+	display: inline-block;
+	padding-inline-start: 4px;
+	color: var(--text-secondary);
+	font-family: var(--font-mono);
+	font-size: 0.66rem;
+	font-weight: 400;
+	white-space: nowrap;
+}
+
+.matrix-axis {
+	min-width: 1.25rem;
+	color: var(--text-secondary);
+	font-size: 0.65rem;
+	font-weight: 550;
+}
+
+.matrix-cell {
+	width: clamp(28px, 3vw, 41px);
+	height: clamp(28px, 3vw, 41px);
+	padding: 2px;
+	border: 1px solid #2a3852;
+	border-radius: var(--radius-sm);
+	background: #111a30;
+	color: var(--text-main);
+	font-size: clamp(0.85rem, 1.4vw, 1.1rem);
+	font-weight: 750;
+	transition: background-color 170ms ease, border-color 170ms ease;
+}
+
+.matrix-board--work .matrix-cell {
+	border-color: #543653;
+	background: #24192f;
+}
+
+.matrix-board--target .matrix-cell {
+	border-color: #294f50;
+	background: #14282d;
+}
+
+.matrix-cell.is-changed {
+	position: relative;
+	border-color: var(--matrix-tint);
+	background: color-mix(in srgb, var(--matrix-tint) 25%, #15172a);
+}
+
+.matrix-progress {
+	align-self: center;
+	margin: 19px 0 auto;
+	padding: 6px 13px;
+	border: 1px solid #38415c;
+	border-radius: var(--radius-full);
+	background-color: #11182a;
+	color: var(--text-secondary);
+	font-size: 0.77rem;
+	font-weight: 650;
+	text-align: center;
+}
+
+.matrix-progress.is-solved {
+	border-color: #337965;
+	background-color: #122f2e;
+	color: #a2f4d9;
+}
