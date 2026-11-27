@@ -1,22 +1,69 @@
 const Storage = {
-	KEY: 'codeboot_save_v1',
+	BASE_KEY: 'codeboot_save_v1',
+	activeUserCode: null,
+
+	setActiveUser(codigoUsuario) {
+		this.activeUserCode = codigoUsuario ? String(codigoUsuario) : null;
+	},
+
+	getStorageKey() {
+		return this.activeUserCode ? `${this.BASE_KEY}_${this.activeUserCode}` : this.BASE_KEY;
+	},
 
 	getDefaultState() {
 		return {
 			studentName: '',
 			unlockedLevel: 0,
+			totalScore: 0,
 			stars: {},
+			scores: {},
+			blocksUsed: {},
+			attempts: {},
+			bestTimes: {},
 			savedWorkspaces: {},
+			pendingAttempts: {},
+			pendingResults: {},
+			pendingImport: null,
 			lastUpdated: Date.now()
 		};
 	},
 
+	normalizeState(raw) {
+		const base = this.getDefaultState();
+		const merged = {
+			...base,
+			...(raw || {}),
+			stars: { ...(raw && raw.stars ? raw.stars : {}) },
+			scores: { ...(raw && raw.scores ? raw.scores : {}) },
+			blocksUsed: { ...(raw && raw.blocksUsed ? raw.blocksUsed : {}) },
+			attempts: { ...(raw && raw.attempts ? raw.attempts : {}) },
+			bestTimes: { ...raw?.bestTimes },
+			savedWorkspaces: { ...(raw && raw.savedWorkspaces ? raw.savedWorkspaces : {}) },
+			pendingAttempts: { ...raw?.pendingAttempts },
+			pendingResults: { ...raw?.pendingResults }
+		};
+		merged.unlockedLevel = Math.max(0, Math.min(LEVELS.length - 1, Math.floor(Number(merged.unlockedLevel) || 0)));
+		const lastCompleted = LEVELS.findLastIndex(level => Number(merged.stars[level.id]) > 0);
+		merged.unlockedLevel = Math.max(merged.unlockedLevel, Math.min(lastCompleted + 1, LEVELS.length - 1));
+		for (const [levelId, time] of Object.entries(merged.bestTimes)) {
+			if (!Number.isInteger(time) || time < 1 || time > 86400000) delete merged.bestTimes[levelId];
+		}
+		for (const levelId in merged.stars) {
+			if (!merged.scores[levelId] && merged.stars[levelId] > 0) {
+				const s = merged.stars[levelId];
+				merged.scores[levelId] = s === 3 ? 350 : s === 2 ? 200 : 100;
+			}
+		}
+		merged.totalScore = this.getTotalScore(merged);
+		return merged;
+	},
+
 	load() {
 		try {
-			const data = localStorage.getItem(this.KEY);
+			const data = localStorage.getItem(this.getStorageKey());
 			if (!data) return this.getDefaultState();
 			const parsed = JSON.parse(data);
-			return { ...this.getDefaultState(), ...parsed };
+			return this.normalizeState(parsed);
 		} catch (e) {
 			return this.getDefaultState();
 		}
@@ -24,14 +71,77 @@ const Storage = {
 
 	save(state) {
 		try {
+			state.totalScore = this.getTotalScore(state);
 			state.lastUpdated = Date.now();
-			localStorage.setItem(this.KEY, JSON.stringify(state));
+			localStorage.setItem(this.getStorageKey(), JSON.stringify(state));
 		} catch (e) {}
+	},
+
+	hydrateFromRemote(remoteProgress, fallbackName, local = this.getDefaultState()) {
+		const mergeRecords = (remote, cached, combine) => {
+			const result = { ...remote };
+			for (const [id, value] of Object.entries(cached)) {
+				result[id] = result[id] == null ? value : combine(result[id], value);
+			}
+			return result;
+		};
+		const normalized = this.normalizeState({
+			...local,
+			studentName: local.studentName || remoteProgress?.studentName || fallbackName || '',
+			unlockedLevel: Math.max(local.unlockedLevel, remoteProgress?.unlockedLevel || 0),
+			stars: mergeRecords(remoteProgress?.stars, local.stars, Math.max),
+			scores: mergeRecords(remoteProgress?.scores, local.scores, Math.max),
+			blocksUsed: mergeRecords(remoteProgress?.blocksUsed, local.blocksUsed, Math.min),
+			attempts: mergeRecords(remoteProgress?.attempts, local.attempts, Math.max),
+			bestTimes: mergeRecords(remoteProgress?.bestTimes, local.bestTimes, Math.min),
+			savedWorkspaces: { ...remoteProgress?.savedWorkspaces, ...local.savedWorkspaces }
+		});
+		this.save(normalized);
+		return normalized;
+	},
+
+	calculateLevelScore(starsWon, blocksUsed, optimalBlocks) {
+		if (starsWon >= 3) {
+			const bonus = Math.max(0, (optimalBlocks - blocksUsed) * 25);
+			return 350 + bonus;
+		}
+		if (starsWon === 2) {
+			return 200;
+		}
+		return 100;
+	},
+
+	getTotalStars(state) {
+		let total = 0;
+		if (!state || !state.stars) return 0;
+		for (const key in state.stars) {
+			total += Number(state.stars[key]) || 0;
+		}
+		return total;
+	},
+
+	getTotalScore(state) {
+		let total = 0;
+		if (!state || !state.scores) return 0;
+		for (const key in state.scores) {
+			total += Number(state.scores[key]) || 0;
+		}
+		return total;
+	},
+
+	getCompletedCount(state) {
+		if (!state || !state.stars) return 0;
+		let count = 0;
+		for (const key in state.stars) {
+			if (Number(state.stars[key]) > 0) count++;
+		}
+		return count;
 	},
 
 	exportCode(state) {
 		try {
-			const json = JSON.stringify(state);
+			const { pendingAttempts, pendingResults, pendingImport, ...backup } = state;
+			const json = JSON.stringify(backup);
 			const encoded = btoa(unescape(encodeURIComponent(json)));
 			return 'CB1-' + encoded;
 		} catch (e) {
@@ -54,17 +164,19 @@ const Storage = {
 			if (typeof state.unlockedLevel !== 'number' || typeof state.stars !== 'object') {
 				throw new Error('Estructura de datos corrupta.');
 			}
-			this.save(state);
-			return state;
+			const normalized = this.normalizeState({ ...state, pendingAttempts: {}, pendingResults: {}, pendingImport: null });
+			this.save(normalized);
+			return normalized;
 		} catch (e) {
 			throw new Error('No se pudo decodificar el código de respaldo.');
 		}
 	},
 
-	renderCertificate(canvas, studentName, totalStars, maxStars) {
+	renderCertificate(canvas, studentName, totalStars, maxStars, totalScore, totalLevels) {
 		const ctx = canvas.getContext('2d');
 		const w = canvas.width;
 		const h = canvas.height;
+		const levelsCount = totalLevels || LEVELS.length;
 
 		ctx.fillStyle = '#ffffff';
 		ctx.fillRect(0, 0, w, h);
@@ -108,11 +220,13 @@ const Storage = {
 
 		ctx.fillStyle = '#d97706';
 		ctx.font = 'bold 16px sans-serif';
-		ctx.fillText(`Calificación de Eficiencia: ${totalStars} de ${maxStars} Estrellas`, w / 2, 245);
+		const scoreSuffix = typeof totalScore === 'number' && totalScore > 0 ? ` • ${totalScore} Puntos` : '';
+		ctx.fillText(`Calificación de Eficiencia: ${totalStars} de ${maxStars} Estrellas${scoreSuffix}`, w / 2, 245);
 
 		ctx.fillStyle = '#475569';
 		ctx.font = '12px sans-serif';
-		ctx.fillText('Completó con éxito los 15 desafíos de Secuencias, Bucles, Condicionales, Variables y Funciones.', w / 2, 280);
+		ctx.fillText(`Completó con éxito los ${levelsCount} desafíos de CodeBoot.`, w / 2, 275);
+		ctx.fillText('Secuencias, Bucles, Condicionales, Variables, Funciones y Matrices', w / 2, 294);
 
 		const date = new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
 		ctx.fillStyle = '#64748b';

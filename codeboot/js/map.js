@@ -28,7 +28,9 @@ const ProgressMap = {
 		{ id: 2, name: "Bucles", color: "#d97706", lightColor: "#fffbeb", bgGradient: "rgba(217, 119, 6, 0.05)", levels: [4, 5, 6, 7] },
 		{ id: 3, name: "Condicionales", color: "#7c3aed", lightColor: "#f5f3ff", bgGradient: "rgba(124, 58, 237, 0.05)", levels: [8, 9, 10, 11] },
 		{ id: 4, name: "Variables", color: "#db2777", lightColor: "#fdf2f8", bgGradient: "rgba(219, 39, 119, 0.05)", levels: [12, 13, 14, 15] },
-		{ id: 5, name: "Funciones", color: "#059669", lightColor: "#ecfdf5", bgGradient: "rgba(5, 150, 105, 0.05)", levels: [16, 17, 18, 19] }
+		{ id: 5, name: "Funciones", color: "#059669", lightColor: "#ecfdf5", bgGradient: "rgba(5, 150, 105, 0.05)", levels: [16, 17, 18, 19] },
+		{ id: 6, name: "Matrices", title: "Nexo Matricial", color: "#fb7185", lightColor: "#fff1f2", bgGradient: "rgba(251, 113, 133, 0.07)", levels: [20, 21, 22, 23] },
+		{ id: 7, name: "Microprocesador", color: "#059669", lightColor: "#ecfdf5", bgGradient: "rgba(5, 150, 105, 0.05)", levels: [24, 25, 26, 27, 28] }
 	],
 
 	init(canvasId, containerId, tooltipId, onSelectLevel) {
@@ -368,7 +370,8 @@ const ProgressMap = {
 
 			this.ctx.fillStyle = biome.color;
 			this.ctx.font = '700 11px Inter, sans-serif';
-			this.ctx.fillText(`BIOMA ${biome.id} • ${biome.name.toUpperCase()}`, leftX + 18, topY + 28);
+			const label = biome.title ? `${biome.name} • ${biome.title}` : biome.name;
+			this.ctx.fillText(`BIOMA ${biome.id} • ${label.toUpperCase()}`, leftX + 18, topY + 28);
 			this.ctx.restore();
 		}
 	},

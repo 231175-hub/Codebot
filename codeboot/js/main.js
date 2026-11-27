@@ -18,19 +18,26 @@ if (origWorkspaceSetScale) {
 const App = {
 	state: null,
 	engine: null,
+	matrixMission: null,
 	workspace: null,
 	currentLevelIndex: 0,
 	isRunning: false,
 	isStepMode: false,
-	abortExecution: false,
 	stepResolver: null,
 	activeMobileView: 'blockly',
 	currentScreen: 'map',
 	pendingMigration: null,
 	mapModule: null,
+	activeRun: null,
+	levelStartedAt: null,
+	session: null,
+	checkingSession: false,
+	syncingStates: new WeakSet(),
 
 	init() {
 		this.state = Storage.load();
+		SoundFX.init();
+		this.updateSoundButton(SoundFX.enabled);
 		BlocksManager.init();
 		if (typeof THREE !== 'undefined' && typeof GameEngine3D !== 'undefined') {
 			this.engine = new GameEngine3D('game-canvas');
@@ -51,8 +58,157 @@ const App = {
 		this.bindEvents();
 		this.bindToolbarEvents();
 		this.updateResponsiveView();
+		Social.init({
+			onLogin: async (email, password) => {
+				const result = await Auth.login(email, password);
+				if (result.success) this.applySession({ ...result, authenticated: true, serverAvailable: true });
+				return result;
+			},
+			onLogout: async () => {
+				const result = await Auth.logout();
+				if (result.success) this.applySession({ authenticated: false, serverAvailable: true });
+				return result;
+			},
+			onSessionExpired: () => this.applySession({ authenticated: false, serverAvailable: true })
+		});
 		this.loadLevel(Math.min(this.state.unlockedLevel, LEVELS.length - 1));
 		this.showScreen('map');
+		this.refreshSession();
+		window.addEventListener('online', () => this.flushProgress());
+		setInterval(() => {
+			if (this.session?.authenticated && !this.session.dbConnected) this.refreshSession();
+			else this.flushProgress();
+		}, 10000);
+	},
+
+	async refreshSession() {
+		if (this.checkingSession) return;
+		this.checkingSession = true;
+		const currentSession = this.session;
+		try {
+			const session = await Auth.checkSession();
+			if (this.session === currentSession && (session.serverAvailable || !currentSession)) {
+				this.applySession(session);
+			}
+		} finally {
+			this.checkingSession = false;
+		}
+	},
+
+	applySession(session) {
+		const user = session.authenticated ? session.user : null;
+		const code = user?.codigoUsuario || null;
+		const reconnected = code && !this.session?.dbConnected && session.dbConnected;
+		this.session = session;
+		if (code !== Storage.activeUserCode) {
+			this.pendingMigration = null;
+			Storage.setActiveUser(code);
+			const local = Storage.load();
+			this.state = user ? Storage.hydrateFromRemote(session.progress, user.nombreCompleto, local) : local;
+			this.loadLevel(this.state.unlockedLevel);
+			this.showScreen('map');
+		} else if (reconnected) {
+			this.state = Storage.hydrateFromRemote(session.progress, user.nombreCompleto, this.state);
+			this.updateMapStats();
+			this.mapModule.updateState(this.state);
+		}
+		Social.setSession(session);
+		this.flushProgress();
+	},
+
+	recordAttempt(nivelId) {
+		const state = this.state;
+		state.attempts[nivelId] = (Number(state.attempts[nivelId]) || 0) + 1;
+		if (Storage.activeUserCode) {
+			const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+			state.pendingAttempts[id] = nivelId;
+		}
+		Storage.save(state);
+		this.flushProgress();
+	},
+
+	saveProgressForAccount(levelId) {
+		if (levelId && Storage.activeUserCode) {
+			const results = this.state.pendingResults;
+			results[levelId] = (results[levelId] || 0) + 1;
+		}
+		Storage.save(this.state);
+		this.flushProgress();
+	},
+
+	async flushProgress() {
+		const state = this.state;
+		const expectedUserCode = Storage.activeUserCode;
+		if (!expectedUserCode || !this.session?.dbConnected || this.syncingStates.has(state)) return;
+		if (!state.pendingImport && !Object.keys(state.pendingAttempts).length && !Object.keys(state.pendingResults).length) return;
+
+		this.syncingStates.add(state);
+		try {
+			while (this.state === state) {
+				const [attempt] = Object.entries(state.pendingAttempts);
+				if (attempt) {
+					const [id, levelId] = attempt;
+					const result = await Auth.recordAttempt(levelId, id, expectedUserCode);
+					if (!result || this.state !== state) return;
+					delete state.pendingAttempts[id];
+					const remaining = Object.values(state.pendingAttempts).filter(pendingLevel => pendingLevel === levelId).length;
+					state.attempts[levelId] = result.data.intentos + remaining;
+					Storage.save(state);
+					continue;
+				}
+				if (state.pendingImport) {
+					const result = await Auth.syncFullProgress({ ...state, attempts: state.pendingImport }, expectedUserCode);
+					if (!result || this.state !== state) return;
+					state.pendingImport = null;
+					state.attempts = { ...result.progress.attempts };
+					for (const pendingLevel of Object.values(state.pendingAttempts)) {
+						state.attempts[pendingLevel] = (state.attempts[pendingLevel] || 0) + 1;
+					}
+					Storage.save(state);
+					continue;
+				}
+				const [pending] = Object.entries(state.pendingResults);
+				if (!pending) return;
+				const [levelId, version] = pending;
+				const result = await Auth.saveLevelProgress({
+					nivelId: levelId,
+					expectedUserCode,
+					estrellas: state.stars[levelId],
+					puntuacion: state.scores[levelId],
+					bloquesUsados: state.blocksUsed[levelId],
+					timeMs: state.bestTimes[levelId],
+					completado: true,
+					unlockedLevel: state.unlockedLevel,
+					workspaceXml: state.savedWorkspaces[levelId]
+				});
+				if (!result || this.state !== state) return;
+				if (state.pendingResults[levelId] === version) {
+					delete state.pendingResults[levelId];
+					Storage.save(state);
+				}
+			}
+		} finally {
+			this.syncingStates.delete(state);
+		}
+	},
+
+	updateSoundButton(enabled) {
+		const button = document.getElementById('btn-sound-toggle');
+		const icon = document.getElementById('icon-sound');
+		const mapButton = document.getElementById('btn-map-sound');
+		if (mapButton) mapButton.textContent = enabled ? 'Silenciar música y efectos' : 'Activar música y efectos';
+		if (!button || !icon) return;
+		if (enabled) {
+			icon.innerHTML = '<path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>';
+			button.title = 'Silenciar música y efectos';
+			button.setAttribute('aria-label', 'Silenciar música y efectos');
+			button.setAttribute('aria-pressed', 'true');
+		} else {
+			icon.innerHTML = '<path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>';
+			button.title = 'Activar música y efectos';
+			button.setAttribute('aria-label', 'Activar música y efectos');
+			button.setAttribute('aria-pressed', 'false');
+		}
 	},
 
 	initBlockly() {
@@ -131,7 +287,7 @@ const App = {
 	initProgressMap() {
 		this.mapModule.init('map-canvas', 'map-scroll-container', 'map-node-tooltip', (levelIndex) => {
 			this.selectLevelFromMap(levelIndex);
-		});
+		}, (levelIndex) => this.isLevelAvailable(levelIndex));
 		this.mapModule.updateState(this.state);
 
 		document.getElementById('btn-map-play-current').addEventListener('click', () => {
@@ -141,33 +297,27 @@ const App = {
 	},
 
 	showScreen(screen) {
+		if (screen !== this.currentScreen) this.levelStartedAt = screen === 'workspace' ? performance.now() : null;
 		this.currentScreen = screen;
+		Social.setVisible(screen === 'map');
 		const mapPanel = document.getElementById('progress-map-panel');
+		const header = document.getElementById('main-header');
 		const workspacePanel = document.getElementById('main-workspace');
-		const toggleBtn = document.getElementById('btn-toggle-map');
-		const toggleText = document.getElementById('btn-toggle-map-text');
-		const counterBadge = document.getElementById('block-counter');
-		const responsiveToggle = document.getElementById('responsive-view-toggle');
 
+		header.hidden = screen === 'map';
 		if (screen === 'map') {
+			if (this.isRunning) this.stop();
 			mapPanel.classList.add('active-screen');
 			workspacePanel.style.display = 'none';
-			toggleBtn.classList.add('active');
-			toggleText.textContent = 'Jugar';
-			counterBadge.style.display = 'none';
-			responsiveToggle.style.display = 'none';
 			this.updateMapStats();
 			this.mapModule.updateState(this.state);
-			setTimeout(() => {
-				this.mapModule.computeLayout();
-				this.mapModule.scrollToNode(this.state.unlockedLevel);
-			}, 50);
+			this.mapModule.computeLayout();
+			this.mapModule.scrollToNode(this.state.unlockedLevel, true);
 		} else {
+			document.getElementById('map-menu').open = false;
+			this.mapModule.hideTooltip();
 			mapPanel.classList.remove('active-screen');
 			workspacePanel.style.display = 'flex';
-			toggleBtn.classList.remove('active');
-			toggleText.textContent = 'Mapa';
-			counterBadge.style.display = 'flex';
 			this.updateResponsiveView();
 			setTimeout(() => {
 				if (this.workspace) Blockly.svgResize(this.workspace);
@@ -180,21 +330,27 @@ const App = {
 	},
 
 	selectLevelFromMap(levelIndex) {
+		if (!this.isLevelAvailable(levelIndex)) return;
 		this.loadLevel(levelIndex);
 		this.showScreen('workspace');
+		document.getElementById('btn-toggle-map').focus({ preventScroll: true });
+	},
+
+	isLevelAvailable(index) {
+		const level = LEVELS[index];
+		if (!level) return false;
+		if (level.id === '7.1') return true;
+		return Boolean(index <= this.state.unlockedLevel || Number(this.state.stars[level.id]) > 0);
 	},
 
 	updateMapStats() {
-		let totalStars = 0;
-		for (const key in this.state.stars) {
-			totalStars += this.state.stars[key];
-		}
+		const totalStars = Storage.getTotalStars(this.state);
 		const el = document.getElementById('map-total-stars');
 		if (el) el.textContent = `${totalStars} / ${LEVELS.length * 3}`;
 		const playBtnText = document.getElementById('map-play-btn-text');
 		if (playBtnText) {
 			const currentLevel = LEVELS[Math.min(this.state.unlockedLevel, LEVELS.length - 1)];
-			playBtnText.textContent = `Continuar Nivel ${currentLevel.id}`;
+			playBtnText.textContent = `Continuar ${currentLevel.id}`;
 		}
 	},
 
@@ -316,7 +472,9 @@ const App = {
 
 		document.getElementById('btn-reset').addEventListener('click', () => {
 			this.stop();
-			this.engine.reset();
+			const simulator = this.matrixMission || this.engine;
+			simulator.reset();
+			this.updateCircuitStatus();
 			this.hideToast();
 			if (this.workspace) {
 				this.workspace.highlightBlock(null);
@@ -339,26 +497,19 @@ const App = {
 			document.getElementById('code-drawer').classList.remove('open');
 		});
 
-		document.getElementById('btn-sound-toggle').addEventListener('click', () => {
+		const toggleSound = () => {
 			const enabled = SoundFX.toggle();
-			const icon = document.getElementById('icon-sound');
-			if (enabled) {
-				icon.innerHTML = '<path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>';
-			} else {
-				icon.innerHTML = '<path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>';
-			}
-		});
+			this.updateSoundButton(enabled);
+		};
+		document.getElementById('btn-sound-toggle').addEventListener('click', toggleSound);
 
 		document.getElementById('btn-toggle-map').addEventListener('click', () => {
-			if (this.currentScreen === 'map') {
-				this.showScreen('workspace');
-			} else {
-				this.showScreen('map');
-			}
+			this.showScreen('map');
+			document.getElementById('btn-map-play-current').focus({ preventScroll: true });
 		});
 
 		document.getElementById('btn-open-tutorial').addEventListener('click', () => {
-			this.openTutorialModal();
+			this.openTutorialModal(this.matrixMission ? 5 : undefined);
 		});
 
 		document.getElementById('btn-map-tutorial').addEventListener('click', () => {
@@ -392,10 +543,11 @@ const App = {
 			});
 		}
 
-		document.getElementById('btn-open-levels').addEventListener('click', () => {
+		const openLevels = () => {
 			this.renderLevelsGrid();
 			this.openModal('modal-levels');
-		});
+		};
+		document.getElementById('btn-open-levels').addEventListener('click', openLevels);
 
 		const levelTabs = document.querySelectorAll('#modal-levels-tabs .tab-btn');
 		levelTabs.forEach(tab => {
@@ -407,9 +559,41 @@ const App = {
 			});
 		});
 
-		document.getElementById('btn-open-backup').addEventListener('click', () => {
+		const openBackup = () => {
 			this.updateBackupModal();
 			this.openModal('modal-backup');
+		};
+		document.getElementById('btn-open-backup').addEventListener('click', openBackup);
+
+		const mapMenu = document.getElementById('map-menu');
+		const mapMenuButton = document.getElementById('btn-map-menu');
+		const closeMapMenu = () => {
+			mapMenu.open = false;
+			mapMenuButton.focus({ preventScroll: true });
+		};
+		const mapMenuActions = {
+			'btn-map-levels': openLevels,
+			'btn-map-backup': openBackup,
+			'btn-map-sound': toggleSound,
+			'btn-map-workspace': () => {
+				this.showScreen('workspace');
+				document.getElementById('btn-toggle-map').focus({ preventScroll: true });
+			}
+		};
+		for (const [id, action] of Object.entries(mapMenuActions)) {
+			document.getElementById(id).addEventListener('click', () => {
+				closeMapMenu();
+				action();
+			});
+		}
+		mapMenu.addEventListener('keydown', (event) => {
+			if (event.key === 'Escape' && mapMenu.open) {
+				event.preventDefault();
+				closeMapMenu();
+			}
+		});
+		document.addEventListener('pointerdown', (event) => {
+			if (mapMenu.open && !mapMenu.contains(event.target)) mapMenu.open = false;
 		});
 
 		document.getElementById('student-name-input').addEventListener('input', (e) => {
@@ -432,12 +616,23 @@ const App = {
 			const code = document.getElementById('restore-code-input').value;
 			const msg = document.getElementById('backup-message');
 			try {
-				this.state = Storage.importCode(code);
+				const previous = this.state;
+				const restored = Storage.importCode(code);
+				this.state = Storage.activeUserCode
+					? Storage.hydrateFromRemote(previous, previous.studentName, {
+						...restored,
+						pendingAttempts: previous.pendingAttempts,
+						pendingResults: previous.pendingResults,
+						pendingImport: restored.attempts
+					})
+					: restored;
+				this.saveProgressForAccount();
 				msg.textContent = 'Progreso restaurado con éxito';
 				msg.style.color = 'var(--color-primary)';
 				setTimeout(() => {
 					this.closeModal('modal-backup');
 					this.loadLevel(Math.min(this.state.unlockedLevel, LEVELS.length - 1));
+					if (this.currentScreen === 'map') this.mapModule.scrollToNode(this.state.unlockedLevel, true);
 				}, 1000);
 			} catch (err) {
 				msg.textContent = err.message;
@@ -450,11 +645,12 @@ const App = {
 			if (this.pendingMigration) {
 				const mig = this.pendingMigration;
 				this.pendingMigration = null;
+				const state = this.state;
 				this.showScreen('map');
 				this.mapModule.animateTransition(mig.from, mig.to).then(() => {
-					setTimeout(() => {
+					if (this.currentScreen === 'map' && this.currentLevelIndex === mig.from && this.state === state) {
 						this.selectLevelFromMap(mig.to);
-					}, 400);
+					}
 				});
 			} else if (this.currentLevelIndex < LEVELS.length - 1) {
 				this.loadLevel(this.currentLevelIndex + 1);
@@ -513,9 +709,11 @@ const App = {
 	loadLevel(index) {
 		this.stop();
 		this.currentLevelIndex = index;
+		this.levelStartedAt = this.currentScreen === 'workspace' ? performance.now() : null;
 		const level = LEVELS[index];
 
-		document.getElementById('header-level-title').textContent = `Módulo ${level.id.split('.')[0]} • Nivel ${level.id}`;
+		document.getElementById('header-level-module').textContent = `Módulo ${level.id.split('.')[0]} •`;
+		document.getElementById('header-level-title').textContent = `Nivel ${level.id}`;
 		const starsCount = this.state.stars[level.id] || 0;
 		this.renderStars(document.getElementById('header-stars'), starsCount, 3, false);
 
@@ -538,7 +736,20 @@ const App = {
 			} catch (e) {}
 		}
 
-		this.engine.loadLevel(level);
+		const matrixPanel = document.getElementById('matrix-panel');
+		const isMatrix = Boolean(level.matrix);
+		matrixPanel.hidden = !isMatrix;
+		document.getElementById('game-canvas').hidden = isMatrix;
+		document.querySelector('.sim-camera-toolbar').hidden = isMatrix || typeof this.engine.zoomIn !== 'function';
+		document.getElementById('simulator-panel').classList.toggle('matrix-mission-active', isMatrix);
+		if (isMatrix) {
+			this.matrixMission = new MatrixMission(level.matrix, matrixPanel);
+		} else {
+			matrixPanel.replaceChildren();
+			this.matrixMission = null;
+			this.engine.loadLevel(level);
+		}
+		this.updateCircuitStatus();
 		this.hideToast();
 		const btnFocusBot = document.getElementById('btn-cam-focus-bot');
 		if (btnFocusBot) btnFocusBot.classList.remove('active');
@@ -547,6 +758,24 @@ const App = {
 		this.updateMapStats();
 		this.mapModule.updateState(this.state);
 		Blockly.svgResize(this.workspace);
+	},
+
+	updateCircuitStatus() {
+		const level = LEVELS[this.currentLevelIndex];
+		const status = document.getElementById('mission-circuit-status');
+		const count = document.getElementById('mission-infotron-count');
+		const rule = document.getElementById('mission-alien-rule');
+		status.hidden = !level.infotronsRequired && !level.aliens?.length;
+		if (status.hidden) return;
+		rule.hidden = !level.aliens?.length;
+		count.hidden = !level.infotronsRequired;
+		if (count.hidden) return;
+		const { infotronsCollected, exitUnlocked } = this.engine;
+		const ready = exitUnlocked && this.engine.areAllCoresActive();
+		const nextAction = ready ? ' · Salida abierta' : exitUnlocked ? ' · Enciende el núcleo' : '';
+		const text = `Infotrones ${infotronsCollected} / ${level.infotronsRequired}${nextAction}`;
+		if (text !== count.textContent) count.textContent = text;
+		count.classList.toggle('is-ready', ready);
 	},
 
 	updateBlockStats() {
@@ -590,21 +819,28 @@ const App = {
 
 	async run(stepMode) {
 		if (this.isRunning) return;
+		const run = {};
+		this.activeRun = run;
 		this.isRunning = true;
 		this.isStepMode = stepMode;
-		this.abortExecution = false;
 
 		const btnRun = document.getElementById('btn-run');
 		document.getElementById('run-icon-wrapper').innerHTML = '<svg class="svg-icon" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>';
 		document.getElementById('run-text').textContent = 'Detener';
 		btnRun.style.backgroundColor = 'var(--color-danger)';
 
-		this.engine.reset();
+		const matrix = this.matrixMission;
+		const simulator = matrix || this.engine;
+		simulator.reset();
+		this.updateCircuitStatus();
 		this.hideToast();
 
 		const code = BlocksManager.generateExecutableCode(this.workspace);
+		const blocks = this.workspace.getAllBlocks(false).length;
+		this.recordAttempt(LEVELS[this.currentLevelIndex].id);
+		const startedAt = this.levelStartedAt ?? performance.now();
 
-		const shouldAbort = () => this.abortExecution;
+		const shouldAbort = () => this.activeRun !== run;
 
 		const waitStep = () => {
 			if (!this.isStepMode) return Promise.resolve();
@@ -614,11 +850,17 @@ const App = {
 		};
 
 		const stepProxy = async (action, blockId, arg) => {
-			if (this.abortExecution) {
+			if (shouldAbort()) {
 				throw new Error('ABORTED');
 			}
-			await this.engine.step(action, blockId, arg);
-			if (this.abortExecution) {
+			if (matrix) {
+				this.workspace.highlightBlock(blockId);
+				await matrix.step(action, arg);
+			} else {
+				await this.engine.step(action, blockId, arg);
+				if (!shouldAbort()) this.updateCircuitStatus();
+			}
+			if (shouldAbort()) {
 				throw new Error('ABORTED');
 			}
 			await waitStep();
@@ -629,7 +871,9 @@ const App = {
 			checkPitAhead: () => this.engine.checkPitAhead(),
 			checkWallAhead: () => this.engine.checkWallAhead(),
 			checkLaserAhead: () => this.engine.checkLaserAhead(),
-			isAtGoal: () => this.engine.isAtGoal(),
+			checkDangerAbove: () => this.engine.checkDangerAbove ? this.engine.checkDangerAbove() : false,
+			checkAheadType: (type) => this.engine.checkAheadType ? this.engine.checkAheadType(type) : false,
+			isAtGoal: () => matrix ? matrix.isSolved() : this.engine.isAtGoal(),
 			bot: this.engine.bot
 		};
 
@@ -637,28 +881,32 @@ const App = {
 			const runFn = new Function('engine', 'shouldAbort', `return (${code})(engine, shouldAbort);`);
 			await runFn(wrappedEngine, shouldAbort);
 
-			if (!this.abortExecution) {
+			if (!shouldAbort()) {
+				const timeMs = Math.min(86400000, Math.max(1, Math.round(performance.now() - startedAt)));
 				await new Promise(r => setTimeout(r, 200));
-				this.evaluateOutcome();
+				if (!shouldAbort()) this.evaluateOutcome(blocks, timeMs);
 			}
 		} catch (err) {
-			if (!this.abortExecution && err.message !== 'ABORTED') {
-				if (this.engine && this.engine.bot3D) this.engine.bot3D.setMood('error');
+			if (!shouldAbort() && err.message !== 'ABORTED') {
+				if (!matrix && this.engine.bot3D) this.engine.bot3D.setMood('error');
 				SoundFX.playError();
 				this.showToast(err.message, 'error');
 			}
 		} finally {
-			this.stop();
+			if (!shouldAbort()) {
+				this.updateCircuitStatus();
+				this.stop();
+			}
 		}
 	},
 
-	evaluateOutcome() {
+	evaluateOutcome(blocks, timeMs) {
 		const level = LEVELS[this.currentLevelIndex];
-		const allCoresActive = this.engine.areAllCoresActive();
-		const atGoal = this.engine.isAtGoal();
+		const matrix = this.matrixMission;
+		const allCoresActive = Boolean(matrix) || this.engine.areAllCoresActive();
+		const atGoal = matrix ? matrix.isSolved() : this.engine.isAtGoal();
 
 		if (allCoresActive && atGoal) {
-			const blocks = this.workspace.getAllBlocks(false).length;
 			let starsWon = 1;
 			if (blocks <= level.maxBlocksFor3Stars) {
 				starsWon = 3;
@@ -670,6 +918,10 @@ const App = {
 			if (starsWon > prevStars) {
 				this.state.stars[level.id] = starsWon;
 			}
+			const score = Storage.calculateLevelScore(starsWon, blocks, level.maxBlocksFor3Stars);
+			this.state.scores[level.id] = Math.max(this.state.scores[level.id] || 0, score);
+			this.state.blocksUsed[level.id] = Math.min(this.state.blocksUsed[level.id] ?? Infinity, blocks);
+			this.state.bestTimes[level.id] = Math.min(this.state.bestTimes[level.id] || Infinity, timeMs);
 
 			const oldUnlocked = this.state.unlockedLevel;
 			if (this.currentLevelIndex + 1 > this.state.unlockedLevel) {
@@ -684,11 +936,21 @@ const App = {
 				this.pendingMigration = null;
 			}
 
-			Storage.save(this.state);
+			this.saveProgressForAccount(level.id);
 			this.mapModule.updateState(this.state);
-			if (this.engine && this.engine.bot3D) this.engine.bot3D.setMood('happy');
+			if (!matrix && this.engine.bot3D) this.engine.bot3D.setMood('happy');
 			SoundFX.playSuccess();
 			this.showVictoryModal(starsWon, blocks, level.maxBlocksFor3Stars);
+		} else if (matrix) {
+			SoundFX.playError();
+			this.showToast('La matriz de trabajo aún tiene celdas distintas del objetivo.', 'info');
+		} else if (level.infotronsRequired && !allCoresActive) {
+			this.engine.bot3D?.setMood('error');
+			SoundFX.playError();
+			const message = this.engine.exitUnlocked
+				? 'Acerca a BIT al núcleo de salida y enciéndelo.'
+				: 'Recoge los infotrones que faltan para abrir la salida.';
+			this.showToast(message, 'info');
 		} else if (atGoal && !allCoresActive) {
 			if (this.engine && this.engine.bot3D) this.engine.bot3D.setMood('error');
 			SoundFX.playError();
@@ -701,7 +963,7 @@ const App = {
 	},
 
 	stop() {
-		this.abortExecution = true;
+		this.activeRun = null;
 		this.isRunning = false;
 		this.isStepMode = false;
 		if (this.stepResolver) {
@@ -709,9 +971,8 @@ const App = {
 			this.stepResolver = null;
 			resolve();
 		}
-		if (this.engine) {
-			this.engine.cancelAnimation();
-		}
+		const simulator = this.matrixMission || this.engine;
+		simulator?.cancelAnimation();
 
 		const btnRun = document.getElementById('btn-run');
 		document.getElementById('run-icon-wrapper').innerHTML = '<svg class="svg-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
@@ -776,38 +1037,36 @@ const App = {
 		if (starsLabel) {
 			starsLabel.textContent = `${totalStars} / ${LEVELS.length * 3}`;
 		}
+		document.querySelector('#modal-levels-tabs [data-biome="all"]').textContent = `Todos (${LEVELS.length})`;
 
 		const biomeColors = {
 			1: '#2563eb',
 			2: '#d97706',
-			3: '#7c3aed',
-			4: '#db2777',
-			5: '#059669'
-		};
-		const biomeNames = {
-			1: 'Secuencias',
-			2: 'Bucles',
-			3: 'Condicionales',
-			4: 'Variables',
-			5: 'Funciones'
+			3: '#16a34a',
+			4: '#0d9488',
+			5: '#7c3aed',
+			6: '#fb7185',
+			7: '#059669'
 		};
 
 		LEVELS.forEach((level, idx) => {
-			const biomeId = Math.floor(idx / 4) + 1;
-			if (this.selectedBiomeFilter && this.selectedBiomeFilter !== 'all' && this.selectedBiomeFilter !== String(biomeId)) {
+			const biomeId = level.id.split('.')[0];
+			if (this.selectedBiomeFilter && this.selectedBiomeFilter !== 'all' && this.selectedBiomeFilter !== biomeId) {
 				return;
 			}
 
-			const isUnlocked = idx <= this.state.unlockedLevel;
+			const isUnlocked = this.isLevelAvailable(idx);
 			const isCurrent = idx === this.currentLevelIndex;
 			const stars = this.state.stars[level.id] || 0;
 			const color = biomeColors[biomeId] || '#2563eb';
 
-			const card = document.createElement('div');
+			const card = document.createElement('button');
+			card.type = 'button';
+			card.disabled = !isUnlocked;
 			card.className = `level-card ${isUnlocked ? '' : 'is-locked'} ${isCurrent ? 'is-current' : ''}`;
 			card.style.setProperty('--biome-color', color);
 
-			const headerRow = document.createElement('div');
+			const headerRow = document.createElement('span');
 			headerRow.className = 'level-card-header';
 
 			const tagSpan = document.createElement('span');
@@ -835,17 +1094,17 @@ const App = {
 			headerRow.appendChild(statusSpan);
 			card.appendChild(headerRow);
 
-			const titleDiv = document.createElement('div');
+			const titleDiv = document.createElement('span');
 			titleDiv.className = 'level-card-title';
 			titleDiv.textContent = level.title;
 			card.appendChild(titleDiv);
 
-			const conceptDiv = document.createElement('div');
+			const conceptDiv = document.createElement('span');
 			conceptDiv.className = 'level-card-concept';
-			conceptDiv.textContent = biomeNames[biomeId];
+			conceptDiv.textContent = level.module;
 			card.appendChild(conceptDiv);
 
-			const footerRow = document.createElement('div');
+			const footerRow = document.createElement('span');
 			footerRow.className = 'level-card-footer';
 
 			const starsSpan = document.createElement('span');
@@ -869,7 +1128,7 @@ const App = {
 			if (isUnlocked) {
 				card.addEventListener('click', () => {
 					this.closeModal('modal-levels');
-					this.loadLevel(idx);
+					this.selectLevelFromMap(idx);
 				});
 			}
 
@@ -883,7 +1142,7 @@ const App = {
 		document.getElementById('restore-code-input').value = '';
 		document.getElementById('backup-message').textContent = '';
 
-		const isCompleted = Object.keys(this.state.stars).length >= LEVELS.length;
+		const isCompleted = LEVELS.every(level => Number(this.state.stars[level.id]) > 0);
 		document.getElementById('btn-open-diploma-direct').style.display = isCompleted ? 'inline-block' : 'none';
 	},
 
@@ -904,14 +1163,14 @@ const App = {
 			module: "Módulo 1",
 			title: "Secuencias y Movimiento",
 			badgeColor: "#2563eb",
-			desc: "Aprende los fundamentos del control espacial de BIT. Las instrucciones se ejecutan estrictamente en orden descendente, una tras otra.",
+			desc: "En Pasarela Estelar, recoge infotrones al pasar sobre ellos y enciende el núcleo de salida. Los bloques se ejecutan de arriba abajo. Las patrullas avanzan con cada orden.",
 			blocks: [
 				{ pill: "Avanzar 1 paso", color: "blue", desc: "Desplaza a BIT una baldosa al frente en la dirección que esté mirando." },
 				{ pill: "Girar a la derecha / izquierda", color: "blue", desc: "Rota la orientación de BIT 90 grados en el mismo sitio sin avanzar." },
-				{ pill: "Saltar 2 pasos", color: "blue", desc: "Propulsa a BIT sobre huecos del circuito espacial para aterrizar en suelo firme." },
-				{ pill: "Encender núcleo", color: "green", desc: "Activa el reactor de energía en la baldosa meta para completar la misión." }
+				{ pill: "Esperar 1 turno", color: "blue", desc: "Mantiene a BIT en su casilla durante un turno." },
+				{ pill: "Encender núcleo", color: "green", desc: "Activa el núcleo cuando BIT esté sobre su casilla." }
 			],
-			proTip: "Para obtener 3 estrellas, minimiza la cantidad total de bloques usados. Observa la meta óptima en la barra superior antes de ejecutar."
+			proTip: "Usa Paso a paso para observar a los aliens y los componentes que caen. Elige un desvío o busca un atajo que te permita ganar tres estrellas con menos bloques."
 		},
 		{
 			module: "Módulo 2",
@@ -959,6 +1218,18 @@ const App = {
 				{ pill: "Llamar a función [nombre]", color: "green", desc: "Ejecuta instantáneamente la secuencia completa de la función definida con un solo bloque." }
 			],
 			proTip: "En los niveles finales, definir una función con la maniobra básica (ej. avanzar y saltar) te permitirá resolver circuitos gigantes con la meta óptima de bloques."
+		},
+		{
+			module: "Módulo 6",
+			title: "Matrices y coordenadas",
+			badgeColor: "#fb7185",
+			desc: "Una matriz organiza valores en filas y columnas. La fila se indica primero. Los bloques cuentan desde 1 y el código JavaScript desde 0.",
+			blocks: [
+				{ pill: "Escribir celda", color: "pink", desc: "Cambia el valor en la fila y columna elegidas de la matriz de trabajo." },
+				{ pill: "Copiar celda", color: "pink", desc: "Lee un valor de la matriz fuente y escríbelo en la celda de destino." },
+				{ pill: "Llenar fila o columna", color: "pink", desc: "Asigna un mismo valor a todas las celdas de una fila horizontal o una columna vertical." }
+			],
+			proTip: "Para transponer una matriz, intercambia las coordenadas. Copia cada celda de la fila 2, columna 3 a la fila 3, columna 2, y aplica la misma regla al resto."
 		}
 	],
 

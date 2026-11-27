@@ -71,6 +71,16 @@ const BitRenderer = {
 		ctx.save();
 		ctx.translate(cx, cy);
 
+		if (options.alpha !== undefined) {
+			ctx.globalAlpha = Math.max(0, Math.min(1, options.alpha));
+		}
+		if (options.scaleX !== undefined || options.scaleY !== undefined) {
+			ctx.scale(options.scaleX !== undefined ? options.scaleX : 1, options.scaleY !== undefined ? options.scaleY : 1);
+		}
+		if (options.rotationOffset) {
+			ctx.rotate(options.rotationOffset);
+		}
+
 		const shadowScale = Math.max(0.3, 1 - jumpHeight / 60);
 		ctx.fillStyle = 'rgba(15, 23, 42, 0.16)';
 		ctx.beginPath();

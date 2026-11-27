@@ -1,5 +1,35 @@
 const BlocksManager = {
 	initialized: false,
+	matrixCommands: {
+		matriz_escribir: {
+			label: 'Escribir celda',
+			tooltip: 'Cambia el valor de una celda de la matriz de trabajo.',
+			rows: [[['Fila', 'ROW'], ['Columna', 'COLUMN']], [['Valor', 'VALUE']]],
+			preview: ([row, column, value]) => `matriz[${row - 1}][${column - 1}] = ${value};`
+		},
+		matriz_copiar: {
+			label: 'Copiar celda',
+			tooltip: 'Lee una celda de la matriz fuente y escribe su valor en la matriz de trabajo.',
+			rows: [
+				[['Origen · Fila', 'SOURCE_ROW'], ['Col.', 'SOURCE_COLUMN']],
+				[['Destino · Fila', 'TARGET_ROW'], ['Col.', 'TARGET_COLUMN']]
+			],
+			preview: ([sourceRow, sourceColumn, targetRow, targetColumn]) =>
+				`matriz[${targetRow - 1}][${targetColumn - 1}] = fuente[${sourceRow - 1}][${sourceColumn - 1}];`
+		},
+		matriz_llenar_fila: {
+			label: 'Llenar fila',
+			tooltip: 'Escribe el mismo valor en todas las columnas de una fila.',
+			rows: [[['Fila', 'ROW'], ['Valor', 'VALUE']]],
+			preview: ([row, value]) => `matriz[${row - 1}].fill(${value});`
+		},
+		matriz_llenar_columna: {
+			label: 'Llenar columna',
+			tooltip: 'Escribe el mismo valor en la columna seleccionada de todas las filas.',
+			rows: [[['Columna', 'COLUMN'], ['Valor', 'VALUE']]],
+			preview: ([column, value], indent) => `for (const fila of matriz) {\n${indent}\tfila[${column - 1}] = ${value};\n${indent}}`
+		}
+	},
 
 	createUniformLabel(text, minWidth = 175) {
 		const label = new Blockly.FieldLabel(text);
@@ -142,6 +172,59 @@ const BlocksManager = {
 			}
 		};
 
+		Blockly.Blocks['despejar_frente'] = {
+			init: function() {
+				this.appendDummyInput().appendField(BlocksManager.createUniformLabel("Despejar frente"));
+				this.setPreviousStatement(true, null);
+				this.setNextStatement(true, null);
+				this.setColour('#2563eb');
+				this.setTooltip("Limpia la pista o recolecta el infotrón ubicado frente a BIT sin desplazarse.");
+			}
+		};
+
+		Blockly.Blocks['empujar_frente'] = {
+			init: function() {
+				this.appendDummyInput().appendField(BlocksManager.createUniformLabel("Empujar adelante"));
+				this.setPreviousStatement(true, null);
+				this.setNextStatement(true, null);
+				this.setColour('#2563eb');
+				this.setTooltip("Empuja un componente pesado o disco frente a BIT si hay espacio libre detrás.");
+			}
+		};
+
+		Blockly.Blocks['si_peligro_arriba'] = {
+			init: function() {
+				this.appendDummyInput().appendField(BlocksManager.createUniformLabel("Si hay peligro arriba"));
+				this.appendStatementInput("DO").appendField("hacer");
+				this.appendStatementInput("ELSE").appendField("si no");
+				this.setPreviousStatement(true, null);
+				this.setNextStatement(true, null);
+				this.setColour('#7c3aed');
+				this.setTooltip("Comprueba si un componente pesado o infotrón está a punto de caer sobre BIT.");
+			}
+		};
+
+		Blockly.Blocks['si_objeto_frente'] = {
+			init: function() {
+				this.appendDummyInput()
+					.appendField("Si objeto al frente es")
+					.appendField(new Blockly.FieldDropdown([
+						["Pista", "pista"],
+						["Zonk", "zonk"],
+						["Infotrón", "infotron"],
+						["Vacío", "vacio"],
+						["Muro", "muro"],
+						["Enemigo", "enemigo"]
+					]), "TYPE");
+				this.appendStatementInput("DO").appendField("hacer");
+				this.appendStatementInput("ELSE").appendField("si no");
+				this.setPreviousStatement(true, null);
+				this.setNextStatement(true, null);
+				this.setColour('#7c3aed');
+				this.setTooltip("Evalúa el tipo de elemento presente en la casilla frente a BIT.");
+			}
+		};
+
 		Blockly.Blocks['repetir'] = {
 			init: function() {
 				this.appendDummyInput()
@@ -259,8 +342,32 @@ const BlocksManager = {
 				this.setTooltip("Invoca la función declarada.");
 			}
 		};
+		for (const [type, command] of Object.entries(this.matrixCommands)) {
+			Blockly.Blocks[type] = {
+				init() {
+					this.appendDummyInput().appendField(BlocksManager.createUniformLabel(command.label));
+					for (const row of command.rows) {
+						const line = this.appendDummyInput();
+						for (const [label, field] of row) {
+							const number = field === 'VALUE'
+								? new Blockly.FieldNumber(0, -99, 99, 1)
+								: new Blockly.FieldNumber(1, 1, 9, 1);
+							line.appendField(label).appendField(number, field);
+						}
+					}
+					this.setPreviousStatement(true, null);
+					this.setNextStatement(true, null);
+					this.setColour('#be306e');
+					this.setTooltip(command.tooltip);
+				}
+			};
+		}
 
 		this.initialized = true;
+	},
+
+	getMatrixArguments(block, command) {
+		return command.rows.flat().map(([, field]) => Number(block.getFieldValue(field)));
 	},
 
 	generateExecutableCode(workspace) {
@@ -303,6 +410,25 @@ const BlocksManager = {
 			case 'esperar':
 				code = `if (shouldAbort()) return;\nawait engine.step('esperar', '${id}');\n`;
 				break;
+			case 'despejar_frente':
+				code = `if (shouldAbort()) return;\nawait engine.step('despejar', '${id}');\n`;
+				break;
+			case 'empujar_frente':
+				code = `if (shouldAbort()) return;\nawait engine.step('empujar', '${id}');\n`;
+				break;
+			case 'si_peligro_arriba': {
+				const branchDo = this.blockToExecutable(block.getInputTargetBlock('DO'));
+				const branchElse = this.blockToExecutable(block.getInputTargetBlock('ELSE'));
+				code = `if (engine.checkDangerAbove()) {\n${branchDo}} else {\n${branchElse}}\n`;
+				break;
+			}
+			case 'si_objeto_frente': {
+				const targetType = block.getFieldValue('TYPE') || 'pista';
+				const branchDo = this.blockToExecutable(block.getInputTargetBlock('DO'));
+				const branchElse = this.blockToExecutable(block.getInputTargetBlock('ELSE'));
+				code = `if (engine.checkAheadType('${targetType}')) {\n${branchDo}} else {\n${branchElse}}\n`;
+				break;
+			}
 			case 'recoger_memoria':
 				code = `if (shouldAbort()) return;\nawait engine.step('recoger', '${id}');\n`;
 				break;
@@ -353,8 +479,11 @@ const BlocksManager = {
 				code = `if (shouldAbort()) return;\nif (typeof func_${name} === 'function') await func_${name}();\n`;
 				break;
 			}
-			default:
-				code = '';
+			default: {
+				if (!Object.hasOwn(this.matrixCommands, block.type)) break;
+				const args = this.getMatrixArguments(block, this.matrixCommands[block.type]);
+				code = `if (shouldAbort()) return;\nawait engine.step('${block.type}', ${JSON.stringify(id)}, ${JSON.stringify(args)});\n`;
+			}
 		}
 
 		const nextBlock = block.getNextBlock();
@@ -397,6 +526,25 @@ const BlocksManager = {
 			case 'esperar':
 				line = `${indent}esperar();`;
 				break;
+			case 'despejar_frente':
+				line = `${indent}despejarFrente();`;
+				break;
+			case 'empujar_frente':
+				line = `${indent}empujarAdelante();`;
+				break;
+			case 'si_peligro_arriba': {
+				const branchDo = this.blockToCleanCode(block.getInputTargetBlock('DO'), indentLevel + 1);
+				const branchElse = this.blockToCleanCode(block.getInputTargetBlock('ELSE'), indentLevel + 1);
+				line = `${indent}if (hayPeligroArriba()) {\n${branchDo}\n${indent}} else {\n${branchElse}\n${indent}}`;
+				break;
+			}
+			case 'si_objeto_frente': {
+				const type = block.getFieldValue('TYPE') || 'pista';
+				const branchDo = this.blockToCleanCode(block.getInputTargetBlock('DO'), indentLevel + 1);
+				const branchElse = this.blockToCleanCode(block.getInputTargetBlock('ELSE'), indentLevel + 1);
+				line = `${indent}if (objetoAlFrenteEs('${type}')) {\n${branchDo}\n${indent}} else {\n${branchElse}\n${indent}}`;
+				break;
+			}
 			case 'recoger_memoria':
 				line = `${indent}memoria = leerBateria();`;
 				break;
@@ -447,8 +595,11 @@ const BlocksManager = {
 				line = `${indent}${name}();`;
 				break;
 			}
-			default:
-				line = '';
+			default: {
+				if (!Object.hasOwn(this.matrixCommands, block.type)) break;
+				const command = this.matrixCommands[block.type];
+				line = indent + command.preview(this.getMatrixArguments(block, command), indent);
+			}
 		}
 
 		const nextBlock = block.getNextBlock();
